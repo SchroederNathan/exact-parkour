@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Rooftop Rumble",
+    "slug": "exact-beat-em-up",
+    "version": "0.1.0",
+    "ios": {
+      "bundleIdentifier": "com.schroedernathan.exactbeatemup",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "66ee99d1-8dc0-48de-94eb-578cd52cea7b"
+      }
+    },
+    "owner": "exponathan"
+  }
+}

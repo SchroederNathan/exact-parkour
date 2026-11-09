@@ -1,0 +1,9 @@
+{
+  "app": {
+    "id": "com.schroedernathan.exactbeatemup",
+    "name": "Rooftop Rumble"
+  },
+  "game": {
+    "assets": true
+  }
+}

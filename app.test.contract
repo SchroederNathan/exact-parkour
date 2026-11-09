@@ -1,0 +1,11 @@
+test "Play opens the platform"
+  expect tree has "play"
+  tap "play"
+  expect tree has "world"
+  expect tree missing "move"
+
+test "The world accepts a jump input"
+  tap "play"
+  type "world" key "Space"
+  clock +250
+  expect tree has "world"

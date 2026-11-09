@@ -1,0 +1,7 @@
+{
+  "name": "exact-beat-em-up-release",
+  "private": true,
+  "dependencies": {
+    "expo": "~58.0.2"
+  }
+}

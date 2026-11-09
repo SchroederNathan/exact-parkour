@@ -1,0 +1,10 @@
+{
+  "cli": {
+    "version": ">= 21.4.0"
+  },
+  "build": {
+    "device": {
+      "distribution": "internal"
+    }
+  }
+}
