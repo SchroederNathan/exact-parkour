@@ -1,9 +1,10 @@
 use exact_beat_em_up_logic::locomotion::Stride;
 use exact_beat_em_up_logic::gait::{RUN, SPRINT};
 use exact_beat_em_up_logic::stickman::{self, MODEL};
-use exact_beat_em_up_logic::{ExactBeatEmUp, Options};
+use exact_beat_em_up_logic::{body, ExactBeatEmUp, Options};
 use exact_game::animation::joint_matrix;
-use exact_game::{character::Character, Animator, Pose, Sim, Transform, Vec3};
+use exact_game::{Animator, Pose, Sim, Transform, Vec3};
+use exact_game_physics::CapsuleController;
 
 // A little over one 120 Hz tick: each `run` of it advances exactly one.
 const TICK_MS: f64 = 8.334;
@@ -19,17 +20,42 @@ fn start() -> Sim<ExactBeatEmUp> {
     game
 }
 
+fn velocity(game: &Sim<ExactBeatEmUp>) -> Vec3 {
+    game.get::<CapsuleController>("player").unwrap().velocity
+}
+
 fn planar_speed(game: &Sim<ExactBeatEmUp>) -> f32 {
-    let velocity = game.get::<Character>("player").unwrap().velocity;
+    let velocity = velocity(game);
     Vec3::new(velocity.x, 0.0, velocity.z).length()
+}
+
+// The collision solver returns the speed it achieved, a few ulps from the request.
+#[track_caller]
+fn assert_speed(game: &Sim<ExactBeatEmUp>, expected: f32) {
+    let speed = planar_speed(game);
+    assert!((speed - expected).abs() < 1e-3, "speed {speed}, expected {expected}");
+}
+
+// Height of the feet above the ground plane.
+fn feet_height(game: &Sim<ExactBeatEmUp>) -> f32 {
+    game.global_position("player").unwrap().y - body::HALF
+}
+
+// The visual's world pose: the upright capsule's position and the child's turn.
+fn visual(game: &Sim<ExactBeatEmUp>) -> Transform {
+    let child = *game.get::<Transform>("stickman").unwrap();
+    Transform {
+        position: game.global_position("player").unwrap() + child.position,
+        ..child
+    }
 }
 
 // World positions of a point on each foot: its ankle joint, or its toe.
 fn feet(game: &Sim<ExactBeatEmUp>, toe: bool) -> [Vec3; 2] {
     let w = game.world();
     let model = w.model(MODEL).unwrap();
-    let pose = game.get::<Pose>("player").unwrap();
-    let body = *game.get::<Transform>("player").unwrap();
+    let pose = game.get::<Pose>("stickman").unwrap();
+    let body = visual(game);
     let rig = stickman::rig(1.8);
     ["foot_l", "foot_r"].map(|name| {
         let node = model.nodes.iter().position(|n| n.name == name).unwrap() as u32;
@@ -84,7 +110,7 @@ fn movement_accelerates_brakes_and_jumps() {
     game.hold("KeyW", 100.0);
     let moving = game.global_position("player").unwrap();
     assert!(moving.z < -0.05);
-    assert!(game.get::<Character>("player").unwrap().velocity.z < 0.0);
+    assert!(velocity(&game).z < 0.0);
 
     game.run(200.0);
     let released = game.global_position("player").unwrap();
@@ -94,15 +120,15 @@ fn movement_accelerates_brakes_and_jumps() {
     assert_eq!(game.global_position("player").unwrap(), stopped);
 
     game.tap("Space");
-    game.run(8.334);
-    assert!(game.global_position("player").unwrap().y > 0.0);
+    game.run(100.0);
+    assert!(feet_height(&game) > 0.1);
 }
 
 #[test]
 fn top_speed_arrives_within_a_tenth_of_a_second() {
     let mut game = start();
     game.hold("KeyD", 100.0);
-    assert_eq!(planar_speed(&game), RUN);
+    assert_speed(&game, RUN);
 }
 
 #[test]
@@ -110,13 +136,13 @@ fn shift_sprints_and_releasing_it_returns_to_a_run() {
     let mut game = start();
     game.key_down("KeyW");
     game.run(400.0);
-    assert_eq!(planar_speed(&game), RUN);
+    assert_speed(&game, RUN);
     game.key_down("ShiftLeft");
     game.run(400.0);
-    assert_eq!(planar_speed(&game), SPRINT);
+    assert_speed(&game, SPRINT);
     game.key_up("ShiftLeft");
     game.run(400.0);
-    assert_eq!(planar_speed(&game), RUN);
+    assert_speed(&game, RUN);
 }
 
 #[test]
@@ -135,17 +161,17 @@ fn the_touch_buttons_hold_their_actions() {
     game.input(control("jump", PointerPhase::Down));
     game.input(control("jump", PointerPhase::Up));
     game.run(100.0);
-    assert!(game.global_position("player").unwrap().y > 0.0);
+    assert!(feet_height(&game) > 0.1);
 
     // Sprint lasts exactly as long as the finger is down.
     let mut game = start();
     game.key_down("KeyW");
     game.input(control("sprint", PointerPhase::Down));
     game.run(400.0);
-    assert_eq!(planar_speed(&game), SPRINT);
+    assert_speed(&game, SPRINT);
     game.input(control("sprint", PointerPhase::Up));
     game.run(400.0);
-    assert_eq!(planar_speed(&game), RUN);
+    assert_speed(&game, RUN);
 }
 
 #[test]
@@ -168,7 +194,7 @@ fn the_body_faces_where_it_is_going() {
         let mut game = start();
         game.hold(key, 500.0);
         // The rig's rest pose faces +Z.
-        let facing = game.get::<Transform>("player").unwrap().rotation * Vec3::Z;
+        let facing = game.get::<Transform>("stickman").unwrap().rotation * Vec3::Z;
         assert!(facing.dot(heading) > 0.99, "{key}: facing {facing}");
     }
 }
@@ -188,7 +214,7 @@ fn planted_feet_stay_planted_at_every_pace() {
         // stance with one step; the foot left out in front comes back under the hips.
         let (slid, went) = slip(&mut game, &[], 700.0);
         assert!(slid < 0.3, "{keys:?}: stopping slid {slid} m over {went} m");
-        assert_eq!(game.get::<Stride>("player").unwrap().pace, 0.0);
+        assert_eq!(game.get::<Stride>("stickman").unwrap().pace, 0.0);
     }
 }
 
@@ -228,7 +254,7 @@ fn legs_never_jump_between_ticks() {
     let mut step = |game: &mut Sim<ExactBeatEmUp>, ms: f64| {
         for _ in 0..(ms * 120.0 / 1000.0) as u32 {
             game.run(TICK_MS);
-            let body = game.get::<Character>("player").unwrap().velocity.length() / 120.0;
+            let body = velocity(game).length() / 120.0;
             let now = ankles(game);
             for i in 0..2 {
                 // Motion of the ankle beyond the body's own.
@@ -263,19 +289,19 @@ fn legs_never_jump_between_ticks() {
 fn stopping_settles_into_the_stance_and_jumping_takes_to_the_air() {
     let mut game = start();
     game.hold("KeyW", 600.0);
-    assert!(game.get::<Stride>("player").unwrap().pace > RUN - 0.01);
+    assert!(game.get::<Stride>("stickman").unwrap().pace > RUN - 0.01);
     game.run(160.0);
     // Braked to a stop already, the legs still closing.
-    assert_eq!(planar_speed(&game), 0.0);
-    assert!(game.get::<Stride>("player").unwrap().pace > 0.5);
+    assert_speed(&game, 0.0);
+    assert!(game.get::<Stride>("stickman").unwrap().pace > 0.5);
     game.run(400.0);
-    assert_eq!(game.get::<Stride>("player").unwrap().pace, 0.0);
+    assert_eq!(game.get::<Stride>("stickman").unwrap().pace, 0.0);
 
     game.tap("Space");
     game.run(100.0);
-    assert_eq!(game.get::<Animator>("player").unwrap().state(), "air");
+    assert_eq!(game.get::<Animator>("stickman").unwrap().state(), "air");
     game.run(1500.0);
-    assert_eq!(game.get::<Animator>("player").unwrap().state(), "move");
+    assert_eq!(game.get::<Animator>("stickman").unwrap().state(), "move");
 }
 
 #[test]

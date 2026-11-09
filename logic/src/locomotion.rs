@@ -10,7 +10,7 @@
 use crate::gait::{self, PACES};
 use crate::stickman::LAND_LAYER;
 use exact_game::animation::Layers;
-use exact_game::character::Contact;
+use crate::body::Motion;
 use exact_game::*;
 
 /// The gait the legs are shaped for, and how hard the body is coming down.
@@ -81,8 +81,8 @@ fn to_ready(phase: f32) -> f32 {
 }
 
 /// Set `target`'s Animator and layers for this tick; call before `animation::step`.
-/// `speed` is ground speed in m/s and `rising` vertical velocity in m/s.
-pub fn drive(w: &mut World, target: &str, speed: f32, rising: f32, contact: Contact) {
+pub fn drive(w: &mut World, target: &str, motion: Motion) {
+    let (speed, rising, contact) = (motion.speed, motion.rising, motion);
     let dt = w.dt();
     let ground = speed * dt;
     // The phase the legs were last shown at; none before the first pose, and in the

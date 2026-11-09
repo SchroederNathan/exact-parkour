@@ -1,0 +1,12 @@
+# The game adds the SDK's physics crate; SDK crates resolve against the SDK lock.
+[package]
+name = "exact-beat-em-up-logic"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+workspace = "../.shells"
+
+[dependencies]
+exact-game.workspace = true
+exact-game-physics.workspace = true

@@ -1,24 +1,16 @@
-use exact_game::character::Character;
 use exact_game::*;
+use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
+pub mod body;
 pub mod gait;
 pub mod locomotion;
 pub mod stickman;
 
+use body::Parkour;
 use locomotion::Stride;
-use gait::{RUN, SPRINT};
 
-/// Ground acceleration, m/s²: top speed in about a tenth of a second, and a
-/// change of direction as fast.
-const ACCEL: f32 = 40.0;
-/// Braking with the stick released, m/s²: a run stops within a stride, which is
-/// the distance the legs need to close into a stand without sliding.
-const BRAKE: f32 = 24.0;
-/// The body turns to face where it is going: by this share of the angle left per
-/// second, and never faster than `TURN_MAX` radians per second, so an about-face is
-/// a quick spin and not a flip.
-const TURN: f32 = 18.0;
-const TURN_MAX: f32 = 14.0;
+/// Half the side of the square park, metres.
+pub const PARK: f32 = 30.0;
 
 #[derive(Default, Component)]
 pub struct Player;
@@ -56,40 +48,76 @@ impl Game for ExactBeatEmUp {
             }),
             ..Environment::default()
         });
+        physics::register(w);
+        w.resource_mut::<physics::Physics>().gravity = Vec3::new(0.0, -body::GRAVITY, 0.0);
+        let ground = Mesh::plane(PARK * 2.0, PARK * 2.0);
         w.spawn_named(
             "platform",
             (
                 Transform::default(),
-                Mesh::plane(36.0, 36.0),
+                Collider::of(&ground),
+                ground,
                 Material::grid(Color::hex("#365466"), 1.0),
             ),
         );
+        // Unseen walls keep every body in the park.
+        for (name, x, z) in [
+            ("wall-east", 1.0, 0.0),
+            ("wall-west", -1.0, 0.0),
+            ("wall-south", 0.0, 1.0),
+            ("wall-north", 0.0, -1.0),
+        ] {
+            let across = Vec3::new(z, 0.0, x).abs();
+            w.spawn_named(
+                name,
+                (
+                    Transform::at(x * (PARK + 0.5), 20.0, z * (PARK + 0.5)),
+                    Collider {
+                        shape: Shape::Box {
+                            half: across * PARK + Vec3::new(0.5, 20.0, 0.5),
+                        },
+                        ..Collider::default()
+                    },
+                ),
+            );
+        }
 
-        let rig = stickman::rig(1.8);
+        let rig = stickman::rig(body::HEIGHT);
         let player_mesh = w
             .generated_model(stickman::MODEL, stickman::model(&rig))
             .unwrap();
+        // The capsule stays upright; the visual is its child and does the turning.
+        // It starts half a turn about Y: facing up the screen, away from the camera.
+        let half_turn = std::f32::consts::PI;
         let player = w.spawn_named(
             "player",
             (
-                // Half a turn about Y: facing up the screen, away from the camera.
+                Transform::at(0.0, body::HALF + 0.01, 0.0),
+                CapsuleController {
+                    radius: body::RADIUS,
+                    height: body::HEIGHT,
+                    ..CapsuleController::default()
+                },
+                Parkour {
+                    yaw: half_turn,
+                    ..Parkour::default()
+                },
+                Player,
+            ),
+        );
+        w.spawn_named(
+            "stickman",
+            (
+                Parent(player),
                 Transform {
-                    rotation: Quat::from_xyzw(0.0, 1.0, 0.0, 0.0),
+                    position: Vec3::new(0.0, -body::HALF - 0.01, 0.0),
+                    rotation: Quat::from_rotation_y(half_turn),
                     ..Transform::default()
                 },
                 player_mesh,
                 stickman::animator(),
                 stickman::layers(),
                 Stride::default(),
-                Player,
-                Character::new()
-                    .speed(RUN)
-                    .accel(ACCEL)
-                    .brake(BRAKE)
-                    .jump(1.35)
-                    .gravity(9.81)
-                    .ground(0.0)
-                    .bounds_xz(-17.5..=17.5),
             ),
         );
         w.spawn_named(
@@ -99,7 +127,7 @@ impl Game for ExactBeatEmUp {
                 Camera::default(),
                 Follow::new(player)
                     .offset(0.0, 6.0, 8.0)
-                    .look_at_offset(0.0, 0.8, 0.0)
+                    .look_at_offset(0.0, 0.8 - body::HALF, 0.0)
                     .lag(0.12),
             ),
         );
@@ -117,29 +145,9 @@ impl Game for ExactBeatEmUp {
     }
 
     fn tick(w: &mut World, input: &Input, _: &Options) {
-        let top = if input.held("sprint") { SPRINT } else { RUN };
-        if w.require::<Character>("player").speed != top {
-            w.require_mut::<Character>("player").speed = top;
-        }
-        let contact = w
-            .character("player")
-            .step(input.stick_xz("move"), input.pressed("jump"));
-
-        let velocity = w.require::<Character>("player").velocity;
-        let planar = Vec3::new(velocity.x, 0.0, velocity.z);
-        let speed = planar.length();
-        if speed > 0.02 {
-            // The rig's rest pose faces +Z, so the yaw is the heading itself.
-            let target = Quat::from_rotation_y(math::atan2(planar.x, planar.z));
-            let dt = w.dt();
-            let mut pose = w.require_mut::<Transform>("player");
-            let left = pose.rotation.angle_between(target);
-            if left > 1e-4 {
-                let step = (left * TURN).min(TURN_MAX) * dt;
-                pose.rotation = pose.rotation.slerp(target, (step / left).min(1.0)).normalize();
-            }
-        }
-        locomotion::drive(w, "player", speed, velocity.y, contact);
+        let motion = body::step(w, input);
+        physics::step(w);
+        locomotion::drive(w, "stickman", motion);
         animation::step(w);
     }
 }
