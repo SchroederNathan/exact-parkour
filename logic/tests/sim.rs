@@ -120,20 +120,32 @@ fn shift_sprints_and_releasing_it_returns_to_a_run() {
 }
 
 #[test]
-fn the_touch_controls_jump_by_message_and_sprint_by_argument() {
+fn the_touch_buttons_hold_their_actions() {
+    use exact_game::{InputEvent, PointerPhase};
+    let control = |name: &str, phase| InputEvent::Control {
+        name: name.into(),
+        id: 2,
+        phase,
+        x: 0.0,
+        y: 0.0,
+        at_ms: 0.0,
+        player: 0,
+    };
     let mut game = start();
-    game.post("jump");
+    game.input(control("jump", PointerPhase::Down));
+    game.input(control("jump", PointerPhase::Up));
     game.run(100.0);
     assert!(game.global_position("player").unwrap().y > 0.0);
 
-    let mut game = Sim::<ExactBeatEmUp>::new(Options {
-        seed: 7,
-        sprint: true,
-        ..Options::default()
-    })
-    .unwrap();
-    game.hold("KeyW", 400.0);
+    // Sprint lasts exactly as long as the finger is down.
+    let mut game = start();
+    game.key_down("KeyW");
+    game.input(control("sprint", PointerPhase::Down));
+    game.run(400.0);
     assert_eq!(planar_speed(&game), SPRINT);
+    game.input(control("sprint", PointerPhase::Up));
+    game.run(400.0);
+    assert_eq!(planar_speed(&game), RUN);
 }
 
 #[test]

@@ -7,7 +7,6 @@ component ExactBeatEmUp
   state playing = false
   state paused = false
   state again = false
-  state sprinting = false
   resource viewport = exactViewport() as shape Viewport
   derive touch = viewport.pointer == "coarse"
   derive portrait = viewport.height > viewport.width
@@ -22,39 +21,28 @@ component ExactBeatEmUp
     again = not again
     paused = false
 
-  action jump
-    postMessage("jump", "world")
-
-  action toggleSprint
-    sprinting = not sprinting
-
   view
-    main width="100%" height="100%" position="relative" background-color="#101822" color="#f4f7f8"
+    main width="100%" height="100%" position="relative" viewport-fit="cover" background-color="#101822" color="#f4f7f8"
       if playing
-        canvas surface=world(seed=7, paused=paused, restart=again, sprint=sprinting) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden"
+        canvas surface=world(seed=7, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden"
           if touch
-            button action="move" appearance="none" role="slider" testId="move" position="absolute" left=20 bottom=20 width=104 height=104 border-radius=52 background-color="#f3f7ff42" border-width=1 border-color="#f3f7ff80" backdrop-filter="blur(18px) saturate(1.25)" aria-label="Move"
+            button action="move" appearance="none" role="slider" testId="move" position="absolute" left="calc(env(safe-area-inset-left) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 border-radius=56 background-color="#f3f7ff42" border-width=1 border-color="#f3f7ff80" backdrop-filter="blur(18px) saturate(1.25)" aria-label="Move"
               text "Move" color="#ffffff"
+            button action="sprint" appearance="none" testId="sprint" position="absolute" right="calc(env(safe-area-inset-right) + 128px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=84 height=84 border-radius=42 background-color="#f3f7ff42" border-width=1 border-color="#f3f7ff80" backdrop-filter="blur(18px) saturate(1.25)" aria-label="Sprint"
+              text "Sprint" color="#ffffff" font-weight=600
+            button action="jump" appearance="none" testId="jump" position="absolute" right="calc(env(safe-area-inset-right) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 56px)" width=96 height=96 border-radius=48 background-color="#f3f7ff42" border-width=1 border-color="#f3f7ff80" backdrop-filter="blur(18px) saturate(1.25)" aria-label="Jump"
+              text "Jump" color="#ffffff" font-weight=600
         if touch
-          row position="absolute" top=(portrait ? "env(safe-area-inset-top)" : 20) left=20 right=20 padding=12 justify-content="space-between" pointer-events="none"
+          row position="absolute" top="calc(env(safe-area-inset-top) + 12px)" left="calc(env(safe-area-inset-left) + 20px)" right="calc(env(safe-area-inset-right) + 20px)" justify-content="space-between" pointer-events="none"
             button buttonStyle="glass" press=togglePause testId="pause" pointer-events="auto" aria-label=(paused ? "Resume" : "Pause")
               text (paused ? "Resume" : "Pause")
             if paused
               button buttonStyle="prominent-glass" press=restart testId="restart" pointer-events="auto" aria-label="Restart"
                 text "Restart"
-          row position="absolute" right=20 bottom=(portrait ? "env(safe-area-inset-bottom)" : 20) gap=12 padding=12 pointer-events="none"
-            if sprinting
-              button buttonStyle="prominent-glass" press=toggleSprint testId="sprint" pointer-events="auto" aria-label="Sprint" aria-pressed=true
-                text "Sprint"
-            else
-              button buttonStyle="glass" press=toggleSprint testId="sprint" pointer-events="auto" aria-label="Sprint" aria-pressed=false
-                text "Sprint"
-            button buttonStyle="glass" press=jump testId="jump" pointer-events="auto" aria-label="Jump"
-              text "Jump"
       else
         column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=24
           text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
-          text "A flat platform for a future beat 'em up." max-width=360 text-align="center" color="#b8c8ce"
+          text "An obstacle park for a future beat 'em up." max-width=360 text-align="center" color="#b8c8ce"
           text "Move with WASD or the arrow keys. Hold Shift to sprint. Space jumps." max-width=360 text-align="center" color="#b8c8ce"
           button buttonStyle="filled" press=play autofocus aria-label="Play" testId="play"
             text "Play"

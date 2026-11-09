@@ -9,3 +9,11 @@ test "The world accepts a jump input"
   type "world" key "Space"
   clock +250
   expect tree has "world"
+
+test "A touch screen shows the stick and the round buttons"
+  prefer pointer coarse
+  tap "play"
+  expect tree has "move"
+  expect tree has "sprint"
+  expect tree has "jump"
+  expect tree has "pause"

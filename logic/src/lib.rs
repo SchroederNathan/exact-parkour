@@ -30,9 +30,6 @@ pub struct Options {
     pub paused: bool,
     #[restart]
     pub restart: bool,
-    /// The touch screen's Sprint toggle; a keyboard or pad holds the `sprint` action.
-    #[live]
-    pub sprint: bool,
 }
 
 pub struct ExactBeatEmUp;
@@ -119,18 +116,14 @@ impl Game for ExactBeatEmUp {
         args.paused
     }
 
-    fn tick(w: &mut World, input: &Input, args: &Options) {
-        let sprint = args.sprint || input.held("sprint");
-        let top = if sprint { SPRINT } else { RUN };
+    fn tick(w: &mut World, input: &Input, _: &Options) {
+        let top = if input.held("sprint") { SPRINT } else { RUN };
         if w.require::<Character>("player").speed != top {
             w.require_mut::<Character>("player").speed = top;
         }
-        // The touch screen's Jump is a native glass button, which sits outside the
-        // canvas and so posts a message; a key or pad presses the action.
-        let jump = input.pressed("jump") || input.messages().iter().any(|m| m == "jump");
         let contact = w
             .character("player")
-            .step(input.stick_xz("move"), jump);
+            .step(input.stick_xz("move"), input.pressed("jump"));
 
         let velocity = w.require::<Character>("player").velocity;
         let planar = Vec3::new(velocity.x, 0.0, velocity.z);
