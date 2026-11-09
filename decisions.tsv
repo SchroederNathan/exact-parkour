@@ -1,0 +1,3 @@
+ts	phase	decision	why	evidence	result
+2026-11-09T21:51:37Z	frame	Counted the work: about 10 units (arms, touch buttons, safe area, physics controller, park, vault, ledge grab, landing tiers and roll, ragdoll and get-up, ramp objects), each with tests and a commit	Wanted the size and the order before a long run	commit 2cfde65	baseline committed, 11 logic tests green before changes
+2026-11-09T21:51:37Z	frame	Ragdoll will be a particle and constraint solver in game code that collides through the engine's physics queries	The engine's Rapier wrapper exposes bodies, colliders, a capsule controller and queries, but no joints	/private/tmp/exact-framework-20261109/game/physics/src/types.rs	open, prototype first

@@ -281,3 +281,37 @@ fn restoring_a_save_preserves_the_movement_path() {
     );
     assert_eq!(game.world().hash(), restored.world().hash());
 }
+
+#[test]
+fn the_forearm_follows_the_upper_arm_late() {
+    use exact_beat_em_up_logic::gait::PACES;
+    use exact_game::animation::{bind_pose, sample};
+    use exact_game::Quat;
+    let rig = stickman::rig(1.8);
+    let model = stickman::model(&rig);
+    let rest = bind_pose(&model);
+    let node = |name: &str| model.nodes.iter().position(|n| n.name == name).unwrap();
+    for pace in PACES.iter() {
+        let clip = model.clips.iter().find(|c| c.name == pace.clip()).unwrap();
+        // The cycle phase at which a joint is turned furthest forward about X.
+        let peak = |name: &str| {
+            (0..200)
+                .map(|i| {
+                    let phase = i as f32 / 200.0;
+                    let mut local = vec![];
+                    sample(clip, phase * clip.duration(), &rest, &mut local);
+                    let turn = Quat::from_slice(&local[node(name) * 10 + 3..][..4]);
+                    (phase, turn.to_scaled_axis().x)
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap()
+                .0
+        };
+        let lag = (peak("forearm_r") - peak("upper_arm_r")).rem_euclid(1.0);
+        assert!(
+            (0.04..0.2).contains(&lag),
+            "{}: the elbow peaks {lag} of a cycle after the shoulder",
+            pace.clip()
+        );
+    }
+}

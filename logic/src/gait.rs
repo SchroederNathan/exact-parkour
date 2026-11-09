@@ -19,6 +19,11 @@ const HEEL_OFF: f32 = 0.55;
 /// The furthest a leg extends, as a share of its full length; it never locks.
 const EXTENT: f32 = 0.995;
 const GRAVITY: f32 = 9.81;
+/// How late, as a share of the cycle, each part of the upper body follows the one
+/// that moves it.
+pub const ELBOW_LAG: f32 = 0.09;
+const WRIST_LAG: f32 = 0.17;
+const CHEST_LAG: f32 = 0.04;
 
 /// One gait, authored for `speed` m/s.
 #[derive(Clone, Copy)]
@@ -324,26 +329,50 @@ pub fn clip(rig: &Rig, pace: &Pace) -> Clip {
         }
     }
 
-    // Each arm is furthest forward as the opposite foot lands.
+    // Each arm swings against the leg on its side: furthest forward as the opposite
+    // foot lands. The swing travels down the arm as a wave. The elbow follows the
+    // shoulder late and the wrist follows the elbow later, so the forearm whips
+    // through and the hand trails. The hand crosses toward the midline in front and
+    // the elbow flares out behind, as a runner's does.
     let swing = |i: usize, phase: f32| math::cos(TAU * (cycle(i) - phase));
-    for (side, phase) in [("l", 0.5), ("r", 0.0)] {
+    for (side, out, phase) in [("l", 1.0, 0.5), ("r", -1.0, 0.0)] {
         tracks.push(turns(
             node(&format!("upper_arm_{side}")) as u32,
             &times,
-            |i| Quat::from_rotation_x(-0.45 * pace.arms * swing(i, phase)),
+            |i| {
+                let s = swing(i, phase);
+                // Further back than forward: the elbow drives the stride.
+                let reach = if s > 0.0 { 0.42 } else { 0.56 };
+                let across = if s > 0.0 { -0.14 * s } else { -0.10 * s };
+                Quat::from_rotation_z(out * (0.05 + pace.arms * across))
+                    * Quat::from_rotation_x(-reach * pace.arms * s)
+            },
         ));
         tracks.push(turns(node(&format!("forearm_{side}")) as u32, &times, |i| {
-            Quat::from_rotation_x(
-                -pace.elbow - 0.3 * pace.arms * (0.5 + 0.5 * swing(i, phase)),
-            )
+            let late = swing(i, phase + ELBOW_LAG);
+            Quat::from_rotation_x(-pace.elbow - 0.45 * pace.arms * (0.5 + 0.5 * late))
+        }));
+        tracks.push(turns(node(&format!("hand_{side}")) as u32, &times, |i| {
+            Quat::from_rotation_x(-0.3 * pace.arms * swing(i, phase + WRIST_LAG))
         }));
     }
-    // The hips turn with the stride; the spine leans in and turns back against them.
+    // The hips turn with the stride. The spine leans in and turns back against them,
+    // the chest turns further and dips toward the planted side, and the neck undoes
+    // all three so the head keeps facing the way the body goes.
+    let twist = |i: usize| pace.arms * swing(i, 0.0);
     tracks.push(turns(hips as u32, &times, |i| {
-        Quat::from_rotation_y(0.08 * pace.arms * swing(i, 0.0))
+        Quat::from_rotation_y(0.08 * twist(i))
     }));
     tracks.push(turns(node("spine") as u32, &times, |i| {
-        Quat::from_rotation_x(pace.lean) * Quat::from_rotation_y(-0.1 * pace.arms * swing(i, 0.0))
+        Quat::from_rotation_x(pace.lean) * Quat::from_rotation_y(-0.1 * twist(i))
+    }));
+    tracks.push(turns(node("chest") as u32, &times, |i| {
+        Quat::from_rotation_y(-0.07 * pace.arms * swing(i, CHEST_LAG))
+            * Quat::from_rotation_z(0.03 * pace.arms * math::sin(TAU * cycle(i)))
+    }));
+    tracks.push(turns(node("neck") as u32, &times, |i| {
+        Quat::from_rotation_y(0.02 * twist(i) + 0.07 * pace.arms * swing(i, CHEST_LAG))
+            * Quat::from_rotation_x(-0.6 * pace.lean)
     }));
     Clip {
         name: pace.clip(),

@@ -184,6 +184,33 @@ fn out(side: f32, angle: f32, forward: f32) -> Quat {
     Quat::from_rotation_z(side * angle) * Quat::from_rotation_x(-forward)
 }
 
+// An additive 3 s loop: the chest rises and settles, the head nods against it,
+// and the arms float out and back a moment after the chest moves them.
+fn breath(rig: &Rig) -> Clip {
+    const PERIOD: f32 = 3.0;
+    let times: Vec<f32> = (0..=24).map(|i| PERIOD * i as f32 / 24.0).collect();
+    let wave = |t: f32, late: f32| math::sin(std::f32::consts::TAU * (t / PERIOD - late));
+    let mut tracks = vec![
+        rotation(node(rig, "spine"), &times, |t| x(-0.025 * wave(t, 0.0))),
+        rotation(node(rig, "chest"), &times, |t| x(-0.015 * wave(t, 0.0))),
+        rotation(node(rig, "neck"), &times, |t| x(0.02 * wave(t, 0.05))),
+    ];
+    for (side, away) in [("l", 1.0), ("r", -1.0)] {
+        let bone = |name: &str| node(rig, &format!("{name}_{side}"));
+        tracks.push(rotation(bone("upper_arm"), &times, move |t| {
+            out(away, 0.025 * wave(t, 0.08), 0.0)
+        }));
+        tracks.push(rotation(bone("forearm"), &times, move |t| {
+            x(-0.03 * (0.5 + 0.5 * wave(t, 0.16)))
+        }));
+    }
+    Clip {
+        name: "breath".into(),
+        tracks,
+        markers: vec![],
+    }
+}
+
 // Rising: the lead knee drives up, the arms reach, the chest opens.
 fn rise(rig: &Rig) -> Clip {
     held(
@@ -275,9 +302,23 @@ fn land(rig: &Rig) -> Clip {
 /// The skinned model with every clip the Animator and its layers name.
 pub fn model(rig: &Rig) -> Model {
     let mut clips = vec![
-        // Rest, as long as the slowest gait so the blend between them keeps its period.
-        held(rig, "stand", PACES[0].period(), &[("hips", Quat::IDENTITY)]),
-        rig.idle("breath"),
+        // A relaxed stand, as long as the slowest gait so the blend between them
+        // keeps its period: elbows a little bent, arms a little off the body.
+        held(
+            rig,
+            "stand",
+            PACES[0].period(),
+            &[
+                ("hips", Quat::IDENTITY),
+                ("upper_arm_l", out(1.0, 0.06, 0.0)),
+                ("upper_arm_r", out(-1.0, 0.06, 0.0)),
+                ("forearm_l", x(-0.2)),
+                ("forearm_r", x(-0.2)),
+                ("hand_l", x(-0.12)),
+                ("hand_r", x(-0.12)),
+            ],
+        ),
+        breath(rig),
         rise(rig),
         fall(rig),
         land(rig),
