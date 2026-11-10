@@ -277,8 +277,12 @@ pub struct Motion {
     /// Downward speed of a touchdown this tick, m/s; zero on every other tick.
     pub impact: f32,
     /// How deep the body kneels out of this tick's landing or roll, 0 to 1; zero
-    /// when it does not.
+    /// when it does not. `kneel_from` is how far into the kneel it starts, 0 to
+    /// 1: a roll comes up out of the kneel's deepest moment.
     pub kneel: f32,
+    pub kneel_from: f32,
+    /// How ready the legs are for the ground that is coming, 0 to 1.
+    pub brace: f32,
     /// Height of the wall a vault or climb is crossing, metres.
     pub height: f32,
     /// Whether a rising body lay on its back.
@@ -307,6 +311,8 @@ pub struct Parkour {
     pub leap: f32,
     /// Whether a finger that came from another touch button rests on Sprint.
     pub glide: bool,
+    /// Seconds the legs are still slow after a landing they barely took.
+    pub stagger: f32,
 }
 
 /// Feet position of a capsule centre.
@@ -372,6 +378,7 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
     };
     body.regrab = (body.regrab - dt).max(0.0);
     body.leap = (body.leap - dt).max(0.0);
+    body.stagger = (body.stagger - dt).max(0.0);
 
     // A hit comes before anything the body meant to do.
     let hit = if matches!(body.action, Action::Ragdoll) {
@@ -511,6 +518,8 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
     let velocity = {
         let mut c = w.require_mut::<CapsuleController>("player");
         let speed = if controls.sprint { SPRINT } else { RUN };
+        // The stride after a landing the legs barely took is short.
+        let speed = if body.stagger > 0.0 { speed * 0.7 } else { speed };
         if c.grounded {
             Move {
                 speed,
@@ -546,12 +555,23 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         body.leap = 0.0;
         motion.impact = impact;
         if (SOFT..ROLL).contains(&impact) {
-            motion.kneel = 0.55 + 0.45 * (impact - SOFT) / (ROLL - SOFT);
+            motion.kneel = 0.5 + 0.5 * (impact - SOFT) / (ROLL - SOFT);
+            if motion.kneel > 0.8 {
+                body.stagger = 0.25;
+            }
         }
         return (touchdown(w, body, impact, speed), motion, None);
     }
     body.airtime += dt;
     body.fall = body.fall.max(-velocity.y);
+    // The legs get ready in the last fifth of a second before the ground.
+    if velocity.y < -1.0 {
+        let feet = w.require::<Transform>("player").position - Vec3::Y * HALF;
+        if let Some(floor) = ledge::ground(w, feet + Vec3::Y * 0.1, 3.0) {
+            let seconds = (feet.y - floor).max(0.0) / -velocity.y;
+            motion.brace = 1.0 - (seconds / 0.2).clamp(0.0, 1.0);
+        }
+    }
 
     // In the air the hands catch an edge the body is moving at. It looks where the
     // stick points, where the body is going, and where it faces: a body that met
@@ -987,8 +1007,14 @@ fn roll(w: &mut World, time: f32, span: f32, heading: Vec3, speed: f32, strain: 
         speed: pace,
         rising: velocity.y,
         grounded: moved.grounded,
-        // A hard roll comes up through a kneel; a light one comes up running.
-        kneel: if u < 1.0 { 0.0 } else { 0.35 + 0.55 * strain },
+        // A roll comes up through a kneel, deeper after a harder landing. The
+        // kneel starts at its deepest as the ball opens, and rises with it.
+        kneel: if (time - w.dt()) / span < 0.78 && u >= 0.78 {
+            0.4 + 0.6 * strain
+        } else {
+            0.0
+        },
+        kneel_from: 0.22,
         ..Motion::default()
     };
     let next = if u < 1.0 {

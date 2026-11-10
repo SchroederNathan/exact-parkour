@@ -18,6 +18,8 @@ pub const LAND_LAYER: usize = 1;
 /// Seconds of the kneel out of a harder landing, and its layer.
 pub const KNEEL_SECONDS: f32 = 0.55;
 pub const KNEEL_LAYER: usize = 2;
+/// The layer of the brace for a landing.
+pub const BRACE_LAYER: usize = 3;
 
 pub fn rig(height: f32) -> Rig {
     let h = height / 1.8;
@@ -215,7 +217,33 @@ fn breath(rig: &Rig) -> Clip {
     }
 }
 
-// Rising: the lead knee drives up, the arms reach, the chest opens.
+// The poses of a body in the air, by its vertical speed. `AIR` gives each its
+// speed in m/s, fastest upward first. The legs are a stride throughout, left leg
+// leading, so a landing is on the left foot and the run goes on from there.
+
+// Leaving the ground: the push leg long behind, the lead knee driving up, the
+// arms as in a stride.
+fn launch(rig: &Rig) -> Clip {
+    held(
+        rig,
+        "launch",
+        1.0,
+        &[
+            ("spine", x(0.1)),
+            ("thigh_l", x(-0.9)),
+            ("shin_l", x(1.4)),
+            ("thigh_r", x(0.5)),
+            ("shin_r", x(0.15)),
+            ("foot_r", x(0.8)),
+            ("upper_arm_l", out(1.0, 0.3, -0.6)),
+            ("forearm_l", x(-0.9)),
+            ("upper_arm_r", out(-1.0, 0.25, 1.1)),
+            ("forearm_r", x(-1.2)),
+        ],
+    )
+}
+
+// Rising: the lead knee high, the push leg folding in behind, the chest open.
 fn rise(rig: &Rig) -> Clip {
     held(
         rig,
@@ -226,37 +254,150 @@ fn rise(rig: &Rig) -> Clip {
             ("thigh_l", x(-0.95)),
             ("shin_l", x(1.35)),
             ("foot_l", x(0.2)),
-            ("thigh_r", x(0.12)),
-            ("shin_r", x(0.45)),
+            ("thigh_r", x(0.4)),
+            ("shin_r", x(0.8)),
             ("foot_r", x(0.55)),
             ("upper_arm_l", out(1.0, 0.35, -0.5)),
             ("forearm_l", x(-0.7)),
             ("upper_arm_r", out(-1.0, 0.5, 0.9)),
-            ("forearm_r", x(-0.9)),
+            ("forearm_r", x(-1.2)),
         ],
     )
 }
 
-// Falling: the legs reach for the ground, the arms spread for balance.
+// The top of the jump: both knees up, the arms out to the sides.
+fn float(rig: &Rig) -> Clip {
+    held(
+        rig,
+        "float",
+        1.0,
+        &[
+            ("spine", x(0.05)),
+            ("thigh_l", x(-1.0)),
+            ("shin_l", x(1.3)),
+            ("thigh_r", x(-0.35)),
+            ("shin_r", x(1.1)),
+            ("foot_r", x(0.3)),
+            ("upper_arm_l", out(1.0, 0.8, 0.25)),
+            ("forearm_l", x(-0.6)),
+            ("upper_arm_r", out(-1.0, 0.8, 0.25)),
+            ("forearm_r", x(-0.6)),
+        ],
+    )
+}
+
+// Coming down: the lead leg opens toward the ground, the other trails.
 fn fall(rig: &Rig) -> Clip {
     held(
         rig,
         "fall",
         1.0,
         &[
-            ("spine", x(0.1)),
-            ("thigh_l", x(-0.4)),
-            ("shin_l", x(0.5)),
-            ("foot_l", x(0.3)),
-            ("thigh_r", x(-0.08)),
-            ("shin_r", x(0.38)),
-            ("foot_r", x(0.3)),
-            ("upper_arm_l", out(1.0, 1.0, 0.25)),
-            ("forearm_l", x(-0.35)),
-            ("upper_arm_r", out(-1.0, 1.0, 0.25)),
-            ("forearm_r", x(-0.35)),
+            ("spine", x(0.12)),
+            ("thigh_l", x(-0.6)),
+            ("shin_l", x(0.45)),
+            ("thigh_r", x(0.15)),
+            ("shin_r", x(0.7)),
+            ("foot_r", x(0.4)),
+            ("upper_arm_l", out(1.0, 0.7, -0.3)),
+            ("forearm_l", x(-0.5)),
+            ("upper_arm_r", out(-1.0, 0.6, 0.4)),
+            ("forearm_r", x(-0.7)),
         ],
     )
+}
+
+// A real drop: both legs reach down, a little bent, and the arms go wide.
+fn reach(rig: &Rig) -> Clip {
+    held(
+        rig,
+        "reach",
+        1.0,
+        &[
+            ("spine", x(0.2)),
+            ("thigh_l", x(-0.5)),
+            ("shin_l", x(0.5)),
+            ("foot_l", x(0.25)),
+            ("thigh_r", x(-0.05)),
+            ("shin_r", x(0.55)),
+            ("foot_r", x(0.25)),
+            ("upper_arm_l", out(1.0, 1.2, 0.15)),
+            ("forearm_l", x(-0.45)),
+            ("upper_arm_r", out(-1.0, 1.2, 0.15)),
+            ("forearm_r", x(-0.45)),
+        ],
+    )
+}
+
+// A fall too long to be easy: the knees come up, the chest goes forward, and the
+// arms are thrown high and back.
+fn plunge(rig: &Rig) -> Clip {
+    held(
+        rig,
+        "plunge",
+        1.0,
+        &[
+            ("spine", x(0.3)),
+            ("neck", x(-0.25)),
+            ("thigh_l", x(-0.75)),
+            ("shin_l", x(1.0)),
+            ("thigh_r", x(-0.3)),
+            ("shin_r", x(0.85)),
+            ("upper_arm_l", out(1.0, 1.6, -0.15)),
+            ("forearm_l", x(-0.3)),
+            ("upper_arm_r", out(-1.0, 1.6, -0.15)),
+            ("forearm_r", x(-0.3)),
+        ],
+    )
+}
+
+/// The air poses and the vertical speed of each, m/s.
+const AIR: [(f32, &str); 6] = [
+    (-8.5, "plunge"),
+    (-5.0, "reach"),
+    (-2.5, "fall"),
+    (0.0, "float"),
+    (1.5, "rise"),
+    (3.8, "launch"),
+];
+
+// An additive pose that the game dials in as the ground comes up: the knees and
+// hips unlock and the feet level, so the legs are already bending when they
+// touch. At its start it is nothing, at its end the whole brace.
+fn brace(rig: &Rig) -> Clip {
+    let times = [0.0, 1.0];
+    let mut tracks = vec![rotation(node(rig, "spine"), &times, |t| x(0.12 * t))];
+    for (side, away) in [("l", 1.0), ("r", -1.0)] {
+        let bone = |name: &str| node(rig, &format!("{name}_{side}"));
+        tracks.push(rotation(bone("thigh"), &times, |t| x(-0.3 * t)));
+        tracks.push(rotation(bone("shin"), &times, |t| x(0.6 * t)));
+        tracks.push(rotation(bone("foot"), &times, |t| x(-0.3 * t)));
+        tracks.push(rotation(bone("upper_arm"), &times, move |t| out(away, -0.2 * t, 0.3 * t)));
+    }
+    Clip {
+        name: "brace".into(),
+        tracks,
+        markers: vec![],
+    }
+}
+
+// How far down a landing has the body at `u` of its length: it goes down from
+// the first moment at the speed it arrived with, slows to its deepest at `deep`,
+// and comes up slowly.
+fn give(u: f32, deep: f32) -> f32 {
+    if u < deep {
+        let left = 1.0 - u / deep;
+        1.0 - left * left
+    } else {
+        1.0 - smooth((u - deep) / (1.0 - deep))
+    }
+}
+
+// How far the arms of a landing body are thrown forward at `u` of its length:
+// back and down with the drop, then forward and up as the body rises.
+fn swing(u: f32, deep: f32) -> f32 {
+    let through = ((u - deep) / (1.0 - deep)).clamp(0.0, 1.0);
+    -0.45 * give(u, deep) + 0.8 * math::sin(std::f32::consts::PI * through)
 }
 
 // An additive one-shot: the knees give on touchdown and push back up. The thigh,
@@ -264,16 +405,8 @@ fn fall(rig: &Rig) -> Clip {
 // while the hips come down by the height the bent leg lost.
 fn land(rig: &Rig) -> Clip {
     const BEND: f32 = 0.5;
-    let times: Vec<f32> = (0..=12).map(|i| LAND_SECONDS * i as f32 / 12.0).collect();
-    let smooth = |u: f32| u * u * (3.0 - 2.0 * u);
-    let give = move |t: f32| {
-        let u = t / LAND_SECONDS;
-        if u < 0.25 {
-            smooth(u / 0.25)
-        } else {
-            1.0 - smooth((u - 0.25) / 0.75)
-        }
-    };
+    let times: Vec<f32> = (0..=14).map(|i| LAND_SECONDS * i as f32 / 14.0).collect();
+    let give = |t: f32| give(t / LAND_SECONDS, 0.25);
     let leg = {
         let bone = |name: &str| {
             let b = &rig.bones()[node(rig, name) as usize];
@@ -282,19 +415,18 @@ fn land(rig: &Rig) -> Clip {
         bone("thigh_l") + bone("shin_l")
     };
     let mut tracks = vec![
-        hips(rig, &times, |t| {
-            leg * (1.0 - math::cos(BEND * give(t)))
-        }),
+        hips(rig, &times, |t| leg * (1.0 - math::cos(BEND * give(t)))),
         rotation(node(rig, "spine"), &times, |t| x(0.22 * give(t))),
     ];
-    for side in ["l", "r"] {
+    for (side, away) in [("l", 1.0), ("r", -1.0)] {
         let bone = |name: &str| node(rig, &format!("{name}_{side}"));
         tracks.push(rotation(bone("thigh"), &times, |t| x(-BEND * give(t))));
         tracks.push(rotation(bone("shin"), &times, |t| x(2.0 * BEND * give(t))));
         tracks.push(rotation(bone("foot"), &times, |t| x(-BEND * give(t))));
-        tracks.push(rotation(bone("upper_arm"), &times, |t| {
-            out(if side == "l" { 1.0 } else { -1.0 }, 0.3 * give(t), 0.0)
+        tracks.push(rotation(bone("upper_arm"), &times, move |t| {
+            out(away, 0.25 * give(t), 0.5 * swing(t / LAND_SECONDS, 0.25))
         }));
+        tracks.push(rotation(bone("forearm"), &times, |t| x(-0.3 * give(t))));
     }
     Clip {
         name: "land".into(),
@@ -695,16 +827,10 @@ fn slide(rig: &Rig) -> Clip {
 // over the knees and the arms thrown forward, and comes up out of it. It plays
 // over the run, so the legs go on striding under it.
 fn kneel(rig: &Rig) -> Clip {
-    const BEND: f32 = 0.95;
-    let times: Vec<f32> = (0..=22).map(|i| KNEEL_SECONDS * i as f32 / 22.0).collect();
-    let give = move |t: f32| {
-        let u = t / KNEEL_SECONDS;
-        if u < 0.22 {
-            smooth(u / 0.22)
-        } else {
-            1.0 - smooth((u - 0.3).max(0.0) / 0.7)
-        }
-    };
+    const BEND: f32 = 0.8;
+    const DEEP: f32 = 0.22;
+    let times: Vec<f32> = (0..=24).map(|i| KNEEL_SECONDS * i as f32 / 24.0).collect();
+    let give = |t: f32| give(t / KNEEL_SECONDS, DEEP);
     let leg = {
         let bone = |name: &str| {
             let b = &rig.bones()[node(rig, name) as usize];
@@ -714,20 +840,27 @@ fn kneel(rig: &Rig) -> Clip {
     };
     let mut tracks = vec![
         hips(rig, &times, |t| leg * (1.0 - math::cos(BEND * give(t)))),
-        rotation(node(rig, "spine"), &times, |t| x(0.5 * give(t))),
-        rotation(node(rig, "neck"), &times, |t| x(-0.35 * give(t))),
+        rotation(node(rig, "spine"), &times, |t| x(0.4 * give(t))),
+        rotation(node(rig, "chest"), &times, |t| x(0.2 * give(t))),
+        rotation(node(rig, "neck"), &times, |t| x(-0.4 * give(t))),
     ];
-    // The left knee goes lower than the right: a kneel, not a squat.
-    for (side, away, deep) in [("l", 1.0, 1.12), ("r", -1.0, 0.88)] {
+    // The left knee goes lower than the right: a kneel, not a squat. The arms go
+    // down with the drop, the left a moment before the right, and are thrown
+    // forward as the body comes up.
+    for (side, away, deep, late) in [("l", 1.0, 1.05, 0.0), ("r", -1.0, 0.95, 0.03)] {
         let bone = |name: &str| node(rig, &format!("{name}_{side}"));
         let bend = BEND * deep;
         tracks.push(rotation(bone("thigh"), &times, move |t| x(-bend * give(t))));
         tracks.push(rotation(bone("shin"), &times, move |t| x(2.0 * bend * give(t))));
         tracks.push(rotation(bone("foot"), &times, move |t| x(-bend * give(t))));
         tracks.push(rotation(bone("upper_arm"), &times, move |t| {
-            out(away, 0.35 * give(t), 0.55 * give(t))
+            let u = ((t - late) / KNEEL_SECONDS).max(0.0);
+            out(away, 0.3 * give(t), swing(u, DEEP))
         }));
-        tracks.push(rotation(bone("forearm"), &times, move |t| x(-0.5 * give(t))));
+        tracks.push(rotation(bone("forearm"), &times, move |t| {
+            let u = ((t - late) / KNEEL_SECONDS).max(0.0);
+            x(-0.25 * give(t) - 0.5 * swing(u, DEEP).max(0.0))
+        }));
     }
     Clip {
         name: "kneel".into(),
@@ -780,13 +913,17 @@ fn crouch(rig: &Rig) -> Clip {
     }
 }
 
-// A forward roll: the body curls into a ball that turns once about its middle,
-// 0.45 m above the ground, and uncurls onto its feet.
+// A forward roll over the right shoulder: the hands go down first and take the
+// ground, the head tucks under, the body curls into a ball that turns once about
+// its middle, 0.45 m above the ground, and uncurls onto its feet, the left leg
+// a moment before the right.
 fn roll(rig: &Rig) -> Clip {
-    let times: Vec<f32> = (0..=32).map(|i| i as f32 / 32.0).collect();
+    let times: Vec<f32> = (0..=40).map(|i| i as f32 / 40.0).collect();
     // How tightly the body is curled, and how far it has turned.
     let curl = |u: f32| smooth(u / 0.2) * (1.0 - smooth((u - 0.78) / 0.22));
     let spin = |u: f32| std::f32::consts::TAU * smooth((u - 0.08) / 0.8);
+    // The arms reach for the ground before the body is a ball.
+    let reach = |u: f32| smooth(u / 0.08) * (1.0 - smooth((u - 0.14) / 0.16));
     let rest = rig.bones()[node(rig, "hips") as usize].head;
     // The hips ride the rim of the ball: its middle is in front of the belly.
     let hips_at = move |u: f32| {
@@ -802,19 +939,28 @@ fn roll(rig: &Rig) -> Clip {
             times: times.clone(),
             values: times.iter().flat_map(|&u| hips_at(u).to_array()).collect(),
         },
-        rotation(node(rig, "hips"), &times, |u| x(spin(u))),
-        rotation(node(rig, "spine"), &times, |u| x(0.55 * curl(u))),
-        rotation(node(rig, "chest"), &times, |u| x(0.35 * curl(u))),
-        rotation(node(rig, "neck"), &times, |u| x(0.5 * curl(u))),
+        // Turned a little onto the right side, so that shoulder leads.
+        rotation(node(rig, "hips"), &times, |u| {
+            x(spin(u)) * Quat::from_rotation_z(0.3 * curl(u))
+        }),
+        rotation(node(rig, "spine"), &times, |u| {
+            x(0.8 * curl(u)) * Quat::from_rotation_y(-0.25 * curl(u))
+        }),
+        rotation(node(rig, "chest"), &times, |u| x(0.55 * curl(u))),
+        rotation(node(rig, "neck"), &times, |u| {
+            x(0.7 * curl(u)) * Quat::from_rotation_z(0.4 * curl(u))
+        }),
     ];
-    for (side, away) in [("l", 1.0), ("r", -1.0)] {
+    for (side, away, late) in [("l", 1.0, 0.0), ("r", -1.0, 0.04)] {
         let bone = |name: &str| node(rig, &format!("{name}_{side}"));
-        tracks.push(rotation(bone("thigh"), &times, |u| x(-2.0 * curl(u))));
-        tracks.push(rotation(bone("shin"), &times, |u| x(2.3 * curl(u))));
+        tracks.push(rotation(bone("thigh"), &times, move |u| x(-2.0 * curl(u - late))));
+        tracks.push(rotation(bone("shin"), &times, move |u| x(2.3 * curl(u - late))));
         tracks.push(rotation(bone("upper_arm"), &times, move |u| {
-            out(away, 0.3 * curl(u), 1.1 * curl(u))
+            out(away, 0.3 * curl(u), 1.5 * reach(u) + 1.1 * curl(u) * (1.0 - reach(u)))
         }));
-        tracks.push(rotation(bone("forearm"), &times, |u| x(-0.2 - 1.6 * curl(u))));
+        tracks.push(rotation(bone("forearm"), &times, move |u| {
+            x(-0.3 * reach(u) - (0.2 + 1.6 * curl(u)) * (1.0 - reach(u)))
+        }));
     }
     Clip {
         name: "roll".into(),
@@ -848,8 +994,13 @@ pub fn model(rig: &Rig) -> Model {
             ],
         ),
         breath(rig),
+        launch(rig),
         rise(rig),
+        float(rig),
         fall(rig),
+        reach(rig),
+        plunge(rig),
+        brace(rig),
         land(rig),
         hang(rig),
         climb(rig),
@@ -881,15 +1032,11 @@ pub fn animator() -> Animator {
         let name = act.state();
         let state = match act {
             Act::Move => State::blend(name, locomotion.clone()).fade(0.14),
-            Act::Air => State::blend(
-                name,
-                Blend::across([(-2.5, "fall"), (2.5, "rise")]).parameter("lift"),
-            )
-            .fade(0.1),
+            Act::Air => State::blend(name, Blend::across(AIR).parameter("lift")).fade(0.1),
             Act::Vault => State::clip(name, "vault").speed(0.0).fade(0.08),
             Act::Hang => State::clip(name, "hang").speed(0.0).fade(0.12),
             Act::Climb => State::clip(name, "climb").speed(0.0).fade(0.1),
-            Act::Roll => State::clip(name, "roll").speed(0.0).fade(0.06),
+            Act::Roll => State::clip(name, "roll").speed(0.0).fade(0.1),
             Act::Land => State::clip(name, "crouch").speed(0.0).fade(0.05),
             Act::Slide => State::clip(name, "slide").speed(0.0).fade(0.08),
             Act::Rise => State::blend(
@@ -914,16 +1061,19 @@ pub fn animator() -> Animator {
     animator
 }
 
-/// Breathing over everything, and the two landings, each parked at its end until
-/// a touchdown rewinds it.
+/// Breathing over everything, the two landings, each parked at its end until a
+/// touchdown rewinds it, and the brace, which the game dials in before one.
 pub fn layers() -> Layers {
     let mut land = Animation::play("land").once();
     land.time = LAND_SECONDS;
     let mut kneel = Animation::play("kneel").once();
     kneel.time = KNEEL_SECONDS;
+    let mut brace = Layer::new(Animation::play("brace").once()).additive();
+    brace.weight = 0.0;
     Layers(vec![
         Layer::new(Animation::play("breath")).additive(),
         Layer::new(land).additive(),
         Layer::new(kneel).additive(),
+        brace,
     ])
 }

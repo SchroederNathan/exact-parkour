@@ -8,7 +8,7 @@
 //! From a stand that makes the first motion a push off the planted foot while the
 //! other swings through; to a stand, the last step closes onto it.
 use crate::gait::{self, PACES};
-use crate::stickman::{KNEEL_LAYER, LAND_LAYER};
+use crate::stickman::{BRACE_LAYER, KNEEL_LAYER, KNEEL_SECONDS, LAND_LAYER};
 use exact_game::animation::Layers;
 use crate::body::{Act, Motion};
 use exact_game::*;
@@ -133,7 +133,7 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     if let Some(phase) = phase.filter(|_| speed < STILL && pace < was && pace < PACES[0].speed) {
         advance = advance.max(to_ready(phase) * (was - pace) / was).min(most);
     }
-    let playing = {
+    {
         let mut animator = w.require_mut::<Animator>(target);
         animator.set("pace", pace);
         animator.set("lift", motion.rising);
@@ -147,8 +147,7 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
         if state.speed != rate {
             state.speed = rate;
         }
-        animator.state() == motion.act.state()
-    };
+    }
     // A held clip shows the moment of the move the body is at. A phase of one
     // would wrap to the start, so the last moment is just short of it.
     let held = match motion.act {
@@ -161,7 +160,10 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     // At a stand every phase looks the same, so that is the moment to pick the one
     // the next step should start from.
     let ready = (motion.act == Act::Move && pace == 0.0 && motion.grounded).then(gait::ready);
-    if let Some(phase) = held.filter(|_| playing).or(ready) {
+    // A landing is on the left foot, which the air poses lead with: the cycle
+    // starts where that foot strikes.
+    let strike = (motion.impact > 0.0 && motion.act == Act::Move).then_some(0.0);
+    if let Some(phase) = held.or(strike).or(ready) {
         if let Some(mut pose) = w.get_mut::<Pose>(target) {
             if pose.phase != phase {
                 pose.phase = phase;
@@ -170,11 +172,23 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     }
     // The knees give on a soft touchdown, more the harder it is. A harder one
     // the body kneels into, and so it comes up out of a hard roll.
+    {
+        // The legs unlock as the ground comes up.
+        let mut layers = w.require_mut::<Layers>(target);
+        let brace = &mut layers.0[BRACE_LAYER];
+        let weight = if motion.brace > 0.0 { 1.0 } else { 0.0 };
+        if brace.weight != weight {
+            brace.weight = weight;
+        }
+        if motion.brace > 0.0 {
+            brace.animation.time = motion.brace.min(1.0);
+        }
+    }
     if motion.kneel > 0.0 {
         let mut layers = w.require_mut::<Layers>(target);
         let kneel = &mut layers.0[KNEEL_LAYER];
         kneel.weight = motion.kneel.min(1.0);
-        kneel.animation.time = 0.0;
+        kneel.animation.time = motion.kneel_from * KNEEL_SECONDS;
     } else if motion.impact > 0.0 && motion.act == Act::Move {
         let mut layers = w.require_mut::<Layers>(target);
         let land = &mut layers.0[LAND_LAYER];
