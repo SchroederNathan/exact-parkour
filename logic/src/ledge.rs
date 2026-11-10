@@ -91,14 +91,19 @@ pub fn probe(w: &World, centre: Vec3, dir: Vec3, reach: f32, low: f32, high: f32
     Some(ledge)
 }
 
-/// Whether an upright capsule centred at `centre` touches nothing solid.
+/// Whether an upright capsule centred at `centre` touches no wall and no prop.
 pub fn clear(w: &World, centre: Vec3) -> bool {
+    clear_of(w, centre, SOLID | PROP)
+}
+
+/// Whether an upright capsule centred at `centre` touches nothing on `layers`.
+pub fn clear_of(w: &World, centre: Vec3, layers: u32) -> bool {
     // A hair smaller than the body, so standing on a surface is not a touch.
     let shape = Shape::Capsule {
         radius: RADIUS - 0.02,
         height: HEIGHT - 0.04,
     };
-    physics::overlap(w, &shape, Transform::at(centre.x, centre.y, centre.z), SOLID | PROP).is_empty()
+    physics::overlap(w, &shape, Transform::at(centre.x, centre.y, centre.z), layers).is_empty()
 }
 
 /// The height of the ground under `point`, within `drop` metres below it.

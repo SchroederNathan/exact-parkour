@@ -7,6 +7,7 @@ pub mod ledge;
 pub mod locomotion;
 pub mod park;
 pub mod ragdoll;
+pub mod rise;
 pub mod stickman;
 
 use body::Parkour;

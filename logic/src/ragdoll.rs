@@ -108,7 +108,7 @@ const WITHIN: [(usize, usize, f32); 4] = [
 ];
 
 const SUBSTEPS: u32 = 2;
-const ITERATIONS: u32 = 8;
+const ITERATIONS: u32 = 12;
 /// Share of the speed along a surface that one contact takes away, and of the
 /// speed into it that bounces back.
 const FRICTION: f32 = 0.35;
@@ -118,6 +118,8 @@ const BOUNCE: f32 = 0.1;
 const STILL: f32 = 0.45;
 const REST_FOR: f32 = 0.45;
 const LIMIT: f32 = 6.0;
+/// The fastest any point may move, m/s.
+const TOP_SPEED: f32 = 25.0;
 
 /// The ragdoll's points; empty while the body is on its feet.
 #[derive(Clone, Debug, Default, Component)]
@@ -144,21 +146,20 @@ impl Ragdoll {
     pub fn active(&self) -> bool {
         !self.at.is_empty()
     }
-    /// The trunk's frame: right, up and forward unit vectors.
+    /// The pelvis's frame: right, up and forward unit vectors.
     pub fn trunk(&self) -> [Vec3; 3] {
-        let right = (self.at[HIP[0]] - self.at[HIP[1]]).normalize_or(Vec3::X);
-        let spine = (self.at[CHEST] - self.at[HIPS]).normalize_or(Vec3::Y);
-        let forward = right.cross(spine).normalize_or(Vec3::Z);
-        [right, forward.cross(right), forward]
+        frame(self.at[HIP[0]] - self.at[HIP[1]], self.at[CHEST] - self.at[HIPS])
     }
-    /// The trunk's turn from the rest pose.
+    /// The pelvis's turn from the rest pose.
     pub fn turn(&self) -> Quat {
-        let [right, up, forward] = self.trunk();
-        Quat::from_mat4(&Mat4::from_cols(
-            right.extend(0.0),
-            up.extend(0.0),
-            forward.extend(0.0),
-            Vec4::W,
+        turn_of(self.trunk())
+    }
+    /// The chest's turn from the rest pose: the same spine, with the shoulders'
+    /// line for its right. It differs from the pelvis's when the trunk is wrung.
+    pub fn chest(&self) -> Quat {
+        turn_of(frame(
+            self.at[SHOULDER[0]] - self.at[SHOULDER[1]],
+            self.at[CHEST] - self.at[HIPS],
         ))
     }
     /// Whether the chest faces the sky.
@@ -183,6 +184,23 @@ impl Ragdoll {
     }
 }
 
+// Right, up and forward unit vectors from a line across the body and its spine.
+fn frame(across: Vec3, spine: Vec3) -> [Vec3; 3] {
+    let right = across.normalize_or(Vec3::X);
+    let forward = right.cross(spine.normalize_or(Vec3::Y)).normalize_or(Vec3::Z);
+    [right, forward.cross(right), forward]
+}
+
+fn turn_of([right, up, forward]: [Vec3; 3]) -> Quat {
+    Quat::from_mat4(&Mat4::from_cols(
+        right.extend(0.0),
+        up.extend(0.0),
+        forward.extend(0.0),
+        Vec4::W,
+    ))
+    .normalize()
+}
+
 fn distance_between(a: usize, b: usize) -> f32 {
     (REST[a] - REST[b]).length()
 }
@@ -202,9 +220,12 @@ fn pull(at: &mut [Vec3], a: usize, b: usize, want: f32, stiffness: f32) {
 }
 
 fn constrain(at: &mut [Vec3]) {
-    for (i, &a) in TRUNK.iter().enumerate() {
-        for &b in &TRUNK[i + 1..] {
-            pull(at, a, b, distance_between(a, b), 1.0);
+    // Twice over the trunk: it is the stiffest part, and the limbs hang from it.
+    for _ in 0..2 {
+        for (i, &a) in TRUNK.iter().enumerate() {
+            for &b in &TRUNK[i + 1..] {
+                pull(at, a, b, distance_between(a, b), 1.0);
+            }
         }
     }
     for (a, b) in BONES {
@@ -243,7 +264,7 @@ fn constrain(at: &mut [Vec3]) {
 
 // Sweep point `i` from `from` to `to` as a sphere. Returns where it may be and the
 // surface it met, if any.
-fn sweep(w: &World, i: usize, from: Vec3, to: Vec3) -> (Vec3, Option<Contact>) {
+fn sweep(w: &World, i: usize, from: Vec3, to: Vec3, layers: u32) -> (Vec3, Option<Contact>) {
     let motion = to - from;
     let length = motion.length();
     let shape = Shape::Sphere { radius: RADIUS[i] };
@@ -254,7 +275,7 @@ fn sweep(w: &World, i: usize, from: Vec3, to: Vec3) -> (Vec3, Option<Contact>) {
                 &shape,
                 Transform::at(from.x, from.y, from.z),
                 motion,
-                SOLID | PROP,
+                layers,
             )
         })
         .flatten()
@@ -345,7 +366,7 @@ pub fn step(w: &mut World) -> bool {
         // the body back into shape without pushing a point through what it met.
         let mut contacts: [Option<Contact>; 15] = [None; 15];
         for i in 0..doll.at.len() {
-            let (to, contact) = sweep(w, i, before[i], doll.at[i]);
+            let (to, contact) = sweep(w, i, before[i], doll.at[i], SOLID | PROP);
             doll.at[i] = to;
             contacts[i] = contact;
         }
@@ -369,6 +390,16 @@ pub fn step(w: &mut World) -> bool {
                 }
             }
         }
+        // The constraints, or a prop pressing on the body, may have pushed a point
+        // through a wall the first sweep did not see. Nothing passes a wall: each
+        // point gives up the part of its motion that goes into one.
+        for i in 0..doll.at.len() {
+            let (to, contact) = sweep(w, i, before[i], doll.at[i], SOLID);
+            if contact.is_some() {
+                doll.at[i] = to;
+                contacts[i] = contact;
+            }
+        }
         for i in 0..doll.at.len() {
             let mut v = (doll.at[i] - before[i]) / h;
             if let Some(c) = contacts[i] {
@@ -378,7 +409,9 @@ pub fn step(w: &mut World) -> bool {
                 let along = relative - c.normal * into;
                 v = c.carried + along * (1.0 - FRICTION) + c.normal * (-into * BOUNCE).max(0.0);
             }
-            doll.velocity[i] = v;
+            // A hard correction in one small step reads as a huge speed. No part
+            // of a falling body moves faster than this.
+            doll.velocity[i] = v.clamp_length_max(TOP_SPEED);
         }
     }
     doll.age += dt;
@@ -408,33 +441,41 @@ pub struct Bend {
 /// root's frame, and each bone's turn.
 pub fn pose(doll: &Ragdoll, root: Vec3, yaw: f32) -> (Vec3, Vec<Bend>) {
     let facing = Quat::from_rotation_y(yaw);
-    let trunk = doll.turn();
+    let pelvis = doll.turn();
+    let chest = doll.chest();
     let hips = facing.inverse() * (doll.at[HIPS] - root);
-    let mut bends = vec![Bend {
-        joint: "hips",
-        turn: (facing.inverse() * trunk).normalize(),
-    }];
+    let mut bends = vec![
+        Bend {
+            joint: "hips",
+            turn: (facing.inverse() * pelvis).normalize(),
+        },
+        // The spine takes up whatever the chest is turned from the pelvis.
+        Bend {
+            joint: "spine",
+            turn: (pelvis.inverse() * chest).normalize(),
+        },
+    ];
     // A bone that rests along `rest` in its parent, turned to point from `a` to `b`.
-    let mut aim = |joint: &'static str, parent: Quat, a: usize, b: usize, from: usize, to: usize| {
-        let rest = (REST[to] - REST[from]).normalize();
+    let mut aim = |joint: &'static str, parent: Quat, a: usize, b: usize| {
+        let rest = (REST[b] - REST[a]).normalize();
         let want = parent.inverse() * (doll.at[b] - doll.at[a]).normalize_or(parent * rest);
         let turn = Quat::from_rotation_arc(rest, want);
         bends.push(Bend { joint, turn });
         (parent * turn).normalize()
     };
-    aim("neck", trunk, CHEST, HEAD, CHEST, HEAD);
+    aim("neck", chest, CHEST, HEAD);
     let names = [
         ["upper_arm_l", "forearm_l", "thigh_l", "shin_l"],
         ["upper_arm_r", "forearm_r", "thigh_r", "shin_r"],
     ];
     for side in 0..2 {
         let [upper_arm, forearm, thigh, shin] = names[side];
-        let arm = aim(upper_arm, trunk, SHOULDER[side], ELBOW[side], SHOULDER[side], ELBOW[side]);
-        aim(forearm, arm, ELBOW[side], HAND[side], ELBOW[side], HAND[side]);
-        let leg = aim(thigh, trunk, HIP[side], KNEE[side], HIP[side], KNEE[side]);
-        aim(shin, leg, KNEE[side], FOOT[side], KNEE[side], FOOT[side]);
+        let arm = aim(upper_arm, chest, SHOULDER[side], ELBOW[side]);
+        aim(forearm, arm, ELBOW[side], HAND[side]);
+        let leg = aim(thigh, pelvis, HIP[side], KNEE[side]);
+        aim(shin, leg, KNEE[side], FOOT[side]);
     }
-    for joint in ["spine", "chest", "head", "hand_l", "hand_r", "foot_l", "foot_r"] {
+    for joint in ["chest", "head", "hand_l", "hand_r", "foot_l", "foot_r"] {
         bends.push(Bend {
             joint,
             turn: Quat::IDENTITY,

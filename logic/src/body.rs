@@ -715,19 +715,6 @@ fn limp(w: &mut World, body: &mut Parkour) -> Outcome {
     }
     let doll = w.require::<Ragdoll>("player").clone();
     let hips = doll.hips();
-    let floor = ledge::ground(w, hips + Vec3::Y * 0.4, 3.0).unwrap_or(hips.y - 0.1);
-    let standing = |x: f32, z: f32| Vec3::new(hips.x + x, floor + HALF + 0.01, hips.z + z);
-    // Stand where the hips are, or at the nearest clear place around them.
-    let ring = [0.0f32, 0.4, 0.8].into_iter().flat_map(|far| {
-        (0..8).map(move |i| {
-            let (sin, cos) = math::sin_cos(i as f32 * std::f32::consts::FRAC_PI_4);
-            (far * sin, far * cos)
-        })
-    });
-    let to = ring
-        .map(|(x, z)| standing(x, z))
-        .find(|at| ledge::clear(w, *at + Vec3::Y * 0.02))
-        .unwrap_or(standing(0.0, 0.0));
     let supine = doll.face_up();
     // The rise is drawn with the head toward +Z for a body on its front, and
     // toward -Z for one on its back.
@@ -737,6 +724,32 @@ fn limp(w: &mut World, body: &mut Parkour) -> Outcome {
     } else {
         lying
     };
+    // It stands up onto its feet, which is ahead of where its hips lay.
+    let ahead = if supine {
+        crate::rise::SUPINE_BACK
+    } else {
+        crate::rise::PRONE_BACK
+    };
+    let spot = hips + heading(body.yaw) * ahead;
+    let floor = ledge::ground(w, hips + Vec3::Y * 0.4, 3.0).unwrap_or(hips.y - 0.1);
+    let standing = |x: f32, z: f32| Vec3::new(spot.x + x, floor + HALF + 0.01, spot.z + z);
+    // There, or at the nearest place around it that is clear. A place clear of
+    // walls but not of a prop is second best: the body can push a prop away.
+    let ring = |layers: u32| {
+        [0.0f32, 0.4, 0.8, 1.2, 1.6]
+            .into_iter()
+            .flat_map(|far| {
+                (0..8).map(move |i| {
+                    let (sin, cos) = math::sin_cos(i as f32 * std::f32::consts::FRAC_PI_4);
+                    (far * sin, far * cos)
+                })
+            })
+            .map(|(x, z)| standing(x, z))
+            .find(|at| ledge::clear_of(w, *at + Vec3::Y * 0.02, layers))
+    };
+    let to = ring(crate::park::SOLID | PROP)
+        .or_else(|| ring(crate::park::SOLID))
+        .unwrap_or(standing(0.0, 0.0));
     let next = Action::Rise {
         time: 0.0,
         from: hips,
@@ -750,13 +763,14 @@ fn limp(w: &mut World, body: &mut Parkour) -> Outcome {
     (next, motion, None)
 }
 
-// Rising: the capsule comes up to standing while the visual's feet stay on the floor.
+// Rising: the visual's root is at the standing place from the first moment, so
+// planted hands and feet stay where they are, and the capsule comes to it.
 fn rise(w: &mut World, time: f32, from: Vec3, to: Vec3, supine: bool) -> Outcome {
     let u = (time / RISE).clamp(0.0, 1.0);
     let centre = from.lerp(to, smooth(u));
     w.require_mut::<Transform>("player").position = centre;
-    let floor = to.y - HALF - 0.01;
-    w.require_mut::<Transform>("stickman").position = Vec3::new(0.0, floor - centre.y, 0.0);
+    let root = to - Vec3::Y * (HALF + 0.01);
+    w.require_mut::<Transform>("stickman").position = root - centre;
     let motion = Motion {
         act: Act::Rise,
         progress: u,
