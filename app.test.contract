@@ -15,5 +15,24 @@ test "A touch screen shows the stick and the round buttons"
   tap "play"
   expect tree has "move"
   expect tree has "sprint"
+  expect tree has "slide"
   expect tree has "jump"
   expect tree has "pause"
+
+test "A finger that slides from Sprint presses the button it arrives on"
+  prefer pointer coarse
+  tap "play"
+  tap "sprint" drag to "jump" hold 200
+  expect state arrived == "jump"
+  expect state under == ""
+  expect state lent == false
+  tap "sprint" drag to "slide" hold 200
+  expect state arrived == "slide"
+
+test "A finger that slides onto Sprint from Jump holds it until it lifts"
+  prefer pointer coarse
+  tap "play"
+  tap "jump" drag to "sprint" hold 200
+  expect state arrived == "sprint"
+  expect state lent == false
+  expect state under == ""
