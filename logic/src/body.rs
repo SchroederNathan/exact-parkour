@@ -3,6 +3,8 @@
 //!
 //! `Action` is the whole story of the body at one tick. Each variant owns the data
 //! of its move, and `step` is the only place one becomes another.
+use crate::air;
+use crate::climb::{self, Climb};
 use crate::flow::{self, Flow};
 use crate::gait::{RUN, SPRINT};
 use crate::hold::{self, Hold, Limb};
@@ -51,8 +53,12 @@ const VAULT_LOW: f32 = 0.35;
 /// The band above the feet in which airborne hands catch an edge, metres.
 const GRAB_LOW: f32 = 1.45;
 const GRAB_HIGH: f32 = 2.1;
-/// Seconds the body takes to swing in under an edge its hands caught.
+/// Seconds the body takes to swing in under an edge its hands caught, and the
+/// time by which nothing is left of how it came. What is left before that dies
+/// away at `CATCH` per second.
 pub const SETTLE: f32 = 0.25;
+const SWUNG_IN: f32 = 0.38;
+const CATCH: f32 = 14.0;
 /// How much closer to the wall than the capsule the drawn body hangs, metres: the
 /// capsule is as thick as the body with its arms, and a hanging body is flat.
 const HUG: f32 = 0.2;
@@ -116,7 +122,7 @@ const MASS: f32 = 80.0;
 const RISE: f32 = 1.8;
 pub const GATHER: f32 = 0.4;
 
-/// A fixed course of the capsule's centre through three points.
+/// A vault's fixed course of the capsule's centre through three points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
 pub struct Path {
     pub from: Vec3,
@@ -135,12 +141,6 @@ pub struct Path {
     /// Where on the wall's top a vault's hand goes down, if `held`.
     pub hand: Vec3,
     pub held: bool,
-    /// A climb out of a hang: how close to the wall the drawn body starts, how
-    /// far the hang had shimmied, which is where its hands are, and how far it
-    /// leaned past the end of the edge.
-    pub hug: f32,
-    pub travel: f32,
-    pub lean: f32,
 }
 
 /// A body that hangs from an edge by its hands.
@@ -148,8 +148,11 @@ pub struct Path {
 pub struct Hang {
     /// The edge, at the point the body hangs under.
     pub ledge: Ledge,
-    /// Where the capsule's centre was when the hands caught the edge.
-    pub caught: Vec3,
+    /// What the capsule is off its place under the edge, metres, and how fast
+    /// that changes: what is left of where and how fast the body was when the
+    /// hands caught the edge.
+    pub off: Vec3,
+    pub drift: Vec3,
     /// Seconds since the catch.
     pub time: f32,
     /// Metres shimmied along the edge, and the speed of it; to the left is positive.
@@ -179,14 +182,15 @@ impl Hang {
     pub fn settled(&self) -> f32 {
         smooth(self.time / SETTLE)
     }
+    /// The capsule's centre: under the edge, less what is left of the catch,
+    /// which is all gone when the body has settled.
+    pub fn centre(&self) -> Vec3 {
+        self.ledge.hang() + self.off * (1.0 - smooth(self.time / SWUNG_IN))
+    }
 }
 impl Path {
     pub fn progress(&self) -> f32 {
         (self.time / self.span).clamp(0.0, 1.0)
-    }
-    // What is left of the lean a climb began with: it straightens first.
-    fn leaning(&self) -> f32 {
-        self.lean * (1.0 - smooth(self.progress() / 0.3))
     }
     // A quadratic curve whose middle is `over`.
     fn at(&self, u: f32) -> Vec3 {
@@ -208,7 +212,7 @@ pub enum Action {
     /// Hanging from an edge by the hands, still or in a shimmy.
     Hang(Hang),
     /// Pulling up onto a top, from a hang, from the ground or out of the air.
-    Climb(Path),
+    Climb(Climb),
     /// Rolling out of a hard landing along `heading`, from `speed` m/s. `strain`
     /// is how hard the landing was, 0 to 1.
     Roll {
@@ -304,6 +308,10 @@ pub struct Motion {
     pub height: f32,
     /// Whether a rising body lay on its back.
     pub supine: bool,
+    /// The leg that leads in the air, +1 the left and -1 the right, and the
+    /// ground speed the body left the ground with, m/s.
+    pub lead: f32,
+    pub stride: f32,
 }
 
 /// The body's own state, beside the controller's.
@@ -334,6 +342,13 @@ pub struct Parkour {
     /// gone up to it, 0 to 1.
     pub ahead: Ledge,
     pub reach: f32,
+    /// The leg that leads in the air, +1 the left and -1 the right: the other
+    /// one pushed. The body lands on it. And the ground speed the body left the
+    /// ground with, m/s, which is how long a stride its legs hold in the air.
+    pub lead: f32,
+    pub stride: f32,
+    /// How ready the legs are for the ground that is coming, 0 to 1.
+    pub brace: f32,
 }
 
 /// Feet position of a capsule centre.
@@ -416,8 +431,8 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
 
     let (action, mut motion, face) = match body.action.clone() {
         Action::Ground | Action::Air => free(w, &mut body, &controls),
-        Action::Vault(path) => follow(w, path, Act::Vault, Action::Vault),
-        Action::Climb(path) => follow(w, path, Act::Climb, Action::Climb),
+        Action::Vault(path) => vault(w, path),
+        Action::Climb(climb) => climbing(w, climb),
         Action::Hang(hanging) => hang(w, &mut body, hanging, &controls),
         Action::Roll {
             time,
@@ -440,6 +455,15 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
             supine,
         } => rise(w, time + dt, from, to, supine),
     };
+    // Into the air from a move that ends in the stride of a left foot's strike,
+    // or from a hang, which is no stride.
+    if matches!(action, Action::Air) && !matches!(body.action, Action::Ground | Action::Air) {
+        body.lead = 1.0;
+        body.stride = match body.action {
+            Action::Hang(_) => 0.0,
+            _ => planar(w.require::<CapsuleController>("player").velocity).length(),
+        };
+    }
     body.action = action;
     // The drawn body is under the capsule, or closer to the wall it climbs. A rise
     // puts it where the body will stand.
@@ -476,6 +500,8 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
         Action::Ragdoll => Act::Air,
         Action::Rise { .. } => Act::Rise,
     };
+    motion.lead = body.lead;
+    motion.stride = body.stride;
     *w.require_mut::<Parkour>("player") = body;
     motion
 }
@@ -500,14 +526,15 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         } else {
             heading(body.yaw)
         };
-        if let Some(next) = over_wall(w, centre, dir, planar(before).length()) {
-            let (path, act) = match &next {
-                Action::Vault(p) => (*p, Act::Vault),
-                Action::Climb(p) => (*p, Act::Climb),
+        let first = step_first(w);
+        if let Some(next) = over_wall(w, centre, dir, before, first) {
+            let (motion, face) = match &next {
+                Action::Vault(path) => (scripted(path), yaw_of(path.exit, dir)),
+                Action::Climb(climb) => (climb.motion(), yaw_of(climb.ledge.inward(), dir)),
                 _ => unreachable!("over_wall returns a vault or a climb"),
             };
             release(w);
-            return (next, scripted(act, &path), Some(yaw_of(path.exit, dir)));
+            return (next, motion, Some(face));
         }
         let mut c = w.require_mut::<CapsuleController>("player");
         Jump {
@@ -579,6 +606,13 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         }
     }
     let grounded = moved.grounded && slip.is_none();
+    // Off the ground, by a jump or past an edge: the leg that is not the one on
+    // the ground leads, and the legs keep the stride of the speed they had.
+    if was_grounded && !grounded {
+        let cycle = w.get::<Pose>("stickman").map_or(0.0, |pose| pose.phase);
+        body.lead = air::lead(cycle);
+        body.stride = planar(before).length();
+    }
     let mut motion = Motion {
         speed,
         rising: velocity.y,
@@ -586,6 +620,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         ..Motion::default()
     };
 
+    body.brace = 0.0;
     if grounded {
         body.reach = 0.0;
         let impact = if was_grounded { 0.0 } else { body.fall };
@@ -609,6 +644,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         if let Some(floor) = ledge::ground(w, feet + Vec3::Y * 0.1, 3.0) {
             let seconds = (feet.y - floor).max(0.0) / -velocity.y;
             motion.brace = 1.0 - (seconds / 0.2).clamp(0.0, 1.0);
+            body.brace = motion.brace;
         }
     }
 
@@ -671,7 +707,8 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
                     reach: body.reach,
                     carried,
                     ledge,
-                    caught: centre,
+                    off: centre - ledge.hang(),
+                    drift: velocity,
                     live: controls.wish.dot(ledge.inward()) < 0.3,
                     pace: velocity.dot(ledge.inward()).max(0.0),
                     swung: velocity.dot(ledge.left()),
@@ -683,16 +720,20 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
                 return (Action::Hang(hanging), Motion::default(), Some(yaw));
             }
         }
-        // A lower edge it pulls straight onto: a jump that fell a little short.
-        if velocity.y < 1.0 {
-            let catch = ledge::probe(w, centre, dir, 0.4, VAULT_LOW, GRAB_LOW)
-                .filter(|l| l.standable && toward(l.inward()));
+        // A lower edge it pulls straight onto: a jump that fell a little short,
+        // or one that is still going up and will not get over the edge.
+        {
+            let peak = centre.y - HALF + velocity.y.max(0.0) * velocity.y.max(0.0) / (2.0 * GRAVITY);
+            let catch = ledge::probe(w, centre, dir, 0.4, VAULT_LOW, GRAB_LOW).filter(|l| {
+                l.standable && toward(l.inward()) && (velocity.y < 1.0 || peak < l.edge.y + 0.05)
+            });
             if let Some(ledge) = catch {
                 release(w);
                 body.fall = 0.0;
-                let path = climb(centre, &ledge, 0.0, 0.0);
+                // The leg that leads the jump is the one that steps up.
+                let climb = Climb::join(centre, velocity, &ledge, body.lead);
                 let yaw = yaw_of(ledge.inward(), dir);
-                return (Action::Climb(path), scripted(Act::Climb, &path), Some(yaw));
+                return (Action::Climb(climb), climb.motion(), Some(yaw));
             }
         }
     }
@@ -715,7 +756,8 @@ fn seated(w: &World, ledge: Ledge) -> Ledge {
 }
 
 // The move a jump at the wall ahead becomes, if there is such a wall.
-fn over_wall(w: &World, centre: Vec3, dir: Vec3, speed: f32) -> Option<Action> {
+fn over_wall(w: &World, centre: Vec3, dir: Vec3, velocity: Vec3, first: f32) -> Option<Action> {
+    let speed = planar(velocity).length();
     let ledge = ledge::probe(w, centre, dir, 1.2, VAULT_LOW, CLIMB_HIGH)?;
     let square = dir.dot(ledge.inward());
     if square < 0.6 {
@@ -761,38 +803,18 @@ fn over_wall(w: &World, centre: Vec3, dir: Vec3, speed: f32) -> Option<Action> {
                 ledge,
                 hand: hand.unwrap_or_default() + Vec3::Y * hold::WRIST,
                 held: hand.is_some(),
-                ..Path::default()
             }));
         }
     }
     ledge
         .standable
-        .then(|| Action::Climb(climb(centre, &ledge, 0.0, 0.0)))
+        .then(|| Action::Climb(Climb::join(centre, velocity, &ledge, first)))
 }
 
-// The course from `centre` up the wall's face and onto its top.
-fn climb(centre: Vec3, ledge: &Ledge, hug: f32, travel: f32) -> Path {
-    let to = ledge.stand();
-    let height = ledge.edge.y - (centre.y - HALF);
-    Path {
-        from: centre,
-        // Clear of the face, with the centre, which is at the hips, just over the
-        // edge: the height of a body that has pressed up onto straight arms. A
-        // body that starts higher than that does not come down to it.
-        over: ledge.edge
-            + ledge.out * (RADIUS * 0.8)
-            + Vec3::Y * (centre.y - ledge.edge.y).clamp(0.2, HALF),
-        to,
-        time: 0.0,
-        span: 0.45 + 0.3 * height.clamp(0.0, 2.1),
-        // It comes off the climb already walking in.
-        exit: ledge.inward() * 1.2,
-        height,
-        ledge: *ledge,
-        hug,
-        travel,
-        ..Path::default()
-    }
+// The foot that steps first onto a top the body climbs from the ground: the one
+// that is not on the ground, by the gait's cycle. +1 the left, -1 the right.
+fn step_first(w: &World) -> f32 {
+    air::lead(w.get::<Pose>("stickman").map_or(0.0, |pose| pose.phase))
 }
 
 // Take the body off the controller's ground for a scripted move.
@@ -808,9 +830,9 @@ fn yaw_of(v: Vec3, fallback: Vec3) -> f32 {
     math::atan2(v.x, v.z)
 }
 
-fn scripted(act: Act, path: &Path) -> Motion {
+fn scripted(path: &Path) -> Motion {
     Motion {
-        act,
+        act: Act::Vault,
         progress: path.progress(),
         height: path.height,
         // A vault leaves at a run, so the stride stays open through it.
@@ -819,27 +841,34 @@ fn scripted(act: Act, path: &Path) -> Motion {
     }
 }
 
-// Fly a vault or a climb along its course, then hand the body back.
-fn follow(w: &mut World, mut path: Path, act: Act, again: fn(Path) -> Action) -> Outcome {
+// Fly a vault along its course at its pace, then hand the body back a step
+// above the ground, where it lands.
+fn vault(w: &mut World, mut path: Path) -> Outcome {
     path.time += w.dt();
     let u = path.progress();
-    // A climb eases in and out; a vault keeps its pace.
-    let along = if act == Act::Climb { smooth(u) } else { u };
-    w.require_mut::<Transform>("player").position = path.at(along);
+    w.require_mut::<Transform>("player").position = path.at(u);
     let face = Some(yaw_of(path.exit, path.to - path.from));
     if u < 1.0 {
-        return (again(path), scripted(act, &path), face);
+        return (Action::Vault(path), scripted(&path), face);
     }
     let mut c = w.require_mut::<CapsuleController>("player");
     c.velocity = path.exit;
-    // A climb ends standing; a vault ends a step above the ground and lands.
-    c.grounded = act == Act::Climb;
-    let next = if c.grounded {
-        Action::Ground
-    } else {
-        Action::Air
+    c.grounded = false;
+    (Action::Air, Motion::default(), face)
+}
+
+// Go on up a climb, then stand the body on the top, walking in.
+fn climbing(w: &mut World, mut climb: Climb) -> Outcome {
+    let (at, exit) = climb.step(w.dt());
+    w.require_mut::<Transform>("player").position = at;
+    let face = Some(yaw_of(climb.ledge.inward(), climb.ledge.inward()));
+    let Some(exit) = exit else {
+        return (Action::Climb(climb), climb.motion(), face);
     };
-    (next, Motion::default(), face)
+    let mut c = w.require_mut::<CapsuleController>("player");
+    c.velocity = exit;
+    c.grounded = true;
+    (Action::Ground, Motion::default(), face)
 }
 
 // Hanging: still, along the edge, up and over, off it in a jump, or let go.
@@ -897,9 +926,14 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
     let away = away && !winding;
     if up && ledge.standable {
         body.buffer = 0.0;
-        let mut path = climb(centre, &ledge, HUG * hanging.settled(), hanging.travel);
-        path.lean = hanging.lean;
-        return (Action::Climb(path), scripted(Act::Climb, &path), face);
+        let left = 1.0 - smooth(hanging.time / SWUNG_IN);
+        let climb = Climb {
+            hug: HUG * hanging.settled(),
+            travel: hanging.travel,
+            lean: hanging.lean,
+            ..Climb::from_hang(centre, hanging.drift * left, &ledge, body.lead)
+        };
+        return (Action::Climb(climb), climb.motion(), face);
     }
     if away || (up && !ledge.standable) {
         body.buffer = 0.0;
@@ -937,8 +971,15 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
     let lean = if pushing && ended { side.signum() } else { 0.0 };
     let change = PEEK_RATE * dt;
     hanging.lean += (lean - hanging.lean).clamp(-change, change);
-    w.require_mut::<Transform>("player").position =
-        hanging.caught.lerp(hanging.ledge.hang(), hanging.settled());
+    // What is left of how the body came dies away, and the wall stops what is
+    // left of a run at it.
+    (hanging.off, hanging.drift) = climb::settle(hanging.off, hanging.drift, CATCH, dt);
+    let into = hanging.off.dot(ledge.inward());
+    if into > 0.0 {
+        hanging.off -= ledge.inward() * into;
+        hanging.drift -= ledge.inward() * hanging.drift.dot(ledge.inward()).max(0.0);
+    }
+    w.require_mut::<Transform>("player").position = hanging.centre();
     let motion = Motion {
         act: Act::Hang,
         ..Motion::default()
@@ -956,9 +997,9 @@ fn hug(action: &Action) -> Vec3 {
                 + hanging.ledge.left() * out(hanging.lean)
         }
         // A climb leaves the wall's face as the chest comes over the edge.
-        Action::Climb(path) => {
-            path.ledge.inward() * (path.hug * (1.0 - smooth(path.progress() / 0.5)))
-                + path.ledge.left() * out(path.leaning())
+        Action::Climb(climb) => {
+            climb.ledge.inward() * (climb.hug * (1.0 - smooth(climb.time / climb::PRESSED)))
+                + climb.ledge.left() * out(climb.leaning())
         }
         _ => Vec3::ZERO,
     }
@@ -1001,18 +1042,45 @@ pub fn holds(w: &World) -> Vec<Hold> {
                 hand.grip(hand.grip * closed)
             })
             .to_vec(),
-        // In the air, with an edge coming: each arm goes up toward where its hand
-        // will be, as far as it reaches.
-        Action::Air if w.require::<Parkour>("player").reach > 0.0 => {
+        Action::Air => {
             let body = w.require::<Parkour>("player");
-            grips(&body.ahead, 0.0, 0.0)
-                .map(|hand| {
+            let mut holds = vec![];
+            // With an edge coming, each arm goes up toward where its hand will
+            // be, as far as it reaches.
+            if body.reach > 0.0 {
+                holds.extend(grips(&body.ahead, 0.0, 0.0).map(|hand| {
                     let shoulder = hold::joint(w, hand.limb.chain()[0]);
                     let to = hand.at - shoulder;
                     let at = shoulder + to.normalize_or_zero() * to.length().min(0.5);
                     Hold::new(hand.limb, at).grip(smooth(body.reach))
-                })
-                .to_vec()
+                }));
+            }
+            // With the ground coming, the leading leg opens toward the place its
+            // foot will strike, and has it as the body arrives. From a stand
+            // both feet come down together.
+            if body.brace > 0.0 {
+                let speed = planar(w.require::<CapsuleController>("player").velocity).length();
+                let feet = centre - Vec3::Y * HALF;
+                let (facing, left) = (heading(body.yaw), Vec3::Y.cross(heading(body.yaw)));
+                let lead = if body.lead < 0.0 { 1 } else { 0 };
+                let strides = crate::gait::planted(speed, air::strike(body.lead));
+                let both = 1.0 - smooth(speed / 1.5);
+                for (leg, limb, side) in [(0, Limb::FootL, 1.0), (1, Limb::FootR, -1.0)] {
+                    let grip = if leg == lead { 1.0 } else { both };
+                    if grip == 0.0 {
+                        continue;
+                    }
+                    let ahead = strides[leg].map_or(0.0, |(ahead, _)| ahead);
+                    let at = feet + facing * ahead + left * (0.09 * side);
+                    let floor = ledge::ground(w, at + Vec3::Y * 0.5, 2.5).unwrap_or(feet.y);
+                    holds.push(
+                        Hold::new(limb, Vec3::new(at.x, floor + hold::ANKLE, at.z))
+                            .grip(grip * smooth(body.brace / 0.5))
+                            .slack(0.45),
+                    );
+                }
+            }
+            holds
         }
         // A slide rides on the tucked foot and the hand behind, and the other
         // heel skims the ground ahead. Each is on the ground where it is, so a
@@ -1051,72 +1119,85 @@ pub fn holds(w: &World) -> Vec<Hold> {
             ]
         }
         Action::Vault(path) if path.held => vec![Hold::new(Limb::HandL, path.hand)],
-        Action::Climb(path) => {
-            let ledge = &path.ledge;
-            // How far the feet's level is above the edge; under it is negative.
-            let level = centre.y - HALF - ledge.edge.y;
+        Action::Climb(climb) => {
+            let ledge = &climb.ledge;
+            let (t, joined) = (climb.time, climb.joined);
             let unfacing = Quat::from_rotation_y(-w.require::<Parkour>("player").yaw);
-            // Where the feet will stand at the end of the climb.
-            let stand = path.to - Vec3::Y * (HALF + 0.01);
-            // A foot comes up close beside the wall's face, toes down, to just
-            // over the edge, and steps in onto the top with its knee up in front
-            // of the body, as on a high stair. It starts when the feet's level
-            // is `from` metres from the edge and is down at `to`: not before the
-            // hips are level with the edge, so the knee has room over the top.
-            // `clear` is how far out from the face it comes up, and `onto` is
-            // where on the top it steps, both in metres from the edge.
+            // Where the feet will stand at the end of the climb, and the top's
+            // level at the edge.
+            let stand = climb::course(ledge, climb::SPAN) - Vec3::Y * (HALF + 0.01);
             let top = Vec3::new(ledge.edge.x, stand.y, ledge.edge.z);
-            // A climb from the ground starts a step or two from the wall. A foot
-            // does not go up onto the top until the body is at the wall.
-            let off = (centre - ledge.edge).dot(ledge.out);
-            let near = smooth((0.5 - off) / 0.15);
-            let step = |side: f32, from: f32, to: f32, clear: f32, onto: f32| {
-                let gate = smooth((level - from) / (to - from))
-                    .min(smooth(path.progress() / 0.45))
-                    .min(near);
+            // A foot comes up beside the wall's face with its knee out to its
+            // own side, swings over the edge in one arc and steps in onto the
+            // top, as on a high stair. It goes from `from` to `to` seconds of
+            // the course, and `onto` is where on the top it steps, in metres
+            // from the edge. Before the swing the leg is where the pose has it,
+            // and the foot takes the hold as it goes.
+            // `under` is how far below the edge it starts from, and `aside` how
+            // far out to its side the knee goes on the way.
+            let step = |side: f32, from: f32, to: f32, onto: f32, under: f32, aside: f32| {
+                let q = ((t - from) / (to - from)).clamp(0.0, 1.0);
                 let beside = ledge.left() * (side * 0.09);
-                let lifted = ledge.edge + ledge.out * clear + beside + Vec3::Y * 0.2;
+                let low = ledge.edge + ledge.out * 0.24 + beside - Vec3::Y * under;
+                let over = ledge.edge + ledge.out * 0.16 + beside + Vec3::Y * 0.5;
                 let down = top + ledge.inward() * onto + beside + Vec3::Y * hold::ANKLE;
-                let carry = smooth((gate - 0.5) / 0.5);
-                // The knee comes up before it goes in, a little to its own side.
-                let up = unfacing * (ledge.left() * (side * 0.4)) + Vec3::Y;
-                let over = unfacing * (ledge.left() * (side * 0.2) + ledge.inward() * 0.4)
+                let s = smooth(q);
+                let at = low * ((1.0 - s) * (1.0 - s)) + over * (2.0 * s * (1.0 - s)) + down * (s * s);
+                // The knee comes up at its own side before it goes in.
+                let up = unfacing * (ledge.left() * (side * aside) + ledge.inward() * (0.5 - aside))
+                    + Vec3::Y * 0.7;
+                let inside = unfacing * (ledge.left() * (side * 0.2) + ledge.inward() * 0.4)
                     + Vec3::Y * 0.8;
-                let knee = up.lerp(over, carry);
                 // The toes point down while the foot comes up beside the wall,
                 // and level as it comes over the edge.
-                let level = smooth((gate - 0.35) / 0.3);
-                (lifted.lerp(down, carry), smooth(gate / 0.5), level, knee)
+                (at, smooth(q / 0.4), smooth((q - 0.55) / 0.3), up.lerp(inside, smooth((q - 0.4) / 0.6)))
             };
-            // The first foot steps onto the top by the edge and takes the weight.
-            // The second steps past it to where the body will stand, and the
-            // first then closes up beside it.
+            // The first foot steps onto the top by the edge and takes the
+            // weight. The second steps past it to where the body will stand,
+            // and the first then closes up beside it. A body that joins the
+            // course late has less time for each.
             let behind = 0.15;
             let ahead = (stand - top).dot(ledge.inward()) - 0.03;
-            let (first, grip, flat, knee) = step(-1.0, -0.95, -0.55, 0.12, behind);
-            let closes = smooth((path.progress() - 0.8) / 0.2);
+            let from = joined.max(0.4);
+            let to = (from + 0.18).max(0.72);
+            // The second knee must be over the top before the hips are.
+            let next = (from + 0.06).max(0.68);
+            let last = (next + 0.22).max(0.94).min(climb::SPAN - 0.02);
+            let (first, grip, flat, knee) = step(climb.first, from, to, behind, 0.5, 0.5);
+            let closes = smooth((t - last) / (climb::SPAN - last));
             let closed = first
                 + ledge.inward() * ((ahead - behind) * closes)
                 + Vec3::Y * (0.06 * math::sin(std::f32::consts::PI * closes));
-            let (second, grip_l, flat_l, knee_l) = step(1.0, -0.6, -0.2, 0.06, ahead);
+            // The hips are over the top by then: the second knee comes
+            // through in front, from where the leg hangs.
+            let (second, grip_2, flat_2, knee_2) = step(-climb.first, next, last, ahead, 0.2, 0.45);
+            let (one, two) = if climb.first > 0.0 {
+                (Limb::FootL, Limb::FootR)
+            } else {
+                (Limb::FootR, Limb::FootL)
+            };
             let feet = [
-                Hold::new(Limb::FootR, closed).grip(grip).flat(flat).bend(knee),
-                Hold::new(Limb::FootL, second).grip(grip_l).flat(flat_l).bend(knee_l),
+                Hold::new(one, closed).grip(grip).flat(flat).bend(knee),
+                Hold::new(two, second).grip(grip_2).flat(flat_2).bend(knee_2),
             ];
-            // The hands press on the edge with the elbows coming up over them,
-            // move in onto the top as the chest comes over, and let go when the
-            // feet have the weight.
-            let u = path.progress();
-            let onto = ledge.inward() * (0.1 * smooth((u - 0.3) / 0.2));
-            let press = smooth((u - 0.25) / 0.2);
-            let mut holds: Vec<Hold> = grips(ledge, path.travel, path.leaning())
+            // The hands hold the edge, roll in onto the top as the chest comes
+            // over with the elbows coming up over them, press, and let go when
+            // the feet have the weight. A body that joins from the ground or
+            // the air puts them down as it arrives, and a top lower than the
+            // hips needs no hands.
+            let onto = ledge.inward() * (0.1 * smooth((t - 0.34) / 0.2));
+            let press = smooth((t - climb::PULLED) / 0.25);
+            let arrives = if joined > 0.0 { smooth((t - joined) / 0.14) } else { 1.0 };
+            let needed = smooth((climb.height - 0.6) / 0.25);
+            let lets_go = 1.0 - smooth((t - 0.72) / 0.14);
+            let mut holds: Vec<Hold> = grips(ledge, climb.travel, climb.leaning())
                 .into_iter()
                 .map(|hand| {
                     let side = if hand.limb == Limb::HandL { 1.0 } else { -1.0 };
                     let elbow = Vec3::new(side * 0.35, 0.0, -0.5)
                         .lerp(Vec3::new(side * 0.3, 0.3, -0.25), press);
                     Hold::new(hand.limb, hand.at + onto)
-                        .grip(hand.grip * (1.0 - smooth((u - 0.6) / 0.15)))
+                        .grip(hand.grip * arrives * needed * lets_go)
                         .bend(elbow)
                 })
                 .collect();
@@ -1517,6 +1598,24 @@ fn lifted(w: &World, need: &dyn Fn(Vec3, f32) -> f32) -> Vec<Hold> {
         .collect()
 }
 
+// Where a foot the pose has in the wall's face must be moved out to. A foot above
+// the top is over the wall, and is left where it is.
+fn kept_out(w: &World, ledge: &Ledge) -> Vec<Hold> {
+    const TOE: Vec3 = Vec3::new(0.0, -0.06, 0.19);
+    [(Limb::FootL, "foot_l"), (Limb::FootR, "foot_r")]
+        .into_iter()
+        .filter_map(|(limb, name)| {
+            let ankle = hold::joint(w, name);
+            let short = |at: Vec3, clear: f32| {
+                let under = smooth((ledge.edge.y + 0.02 - at.y) / 0.08);
+                (clear - (at - ledge.edge).dot(ledge.out)) * under
+            };
+            let short = short(ankle, 0.09).max(short(hold::point(w, name, TOE), 0.02));
+            (short > 0.0).then(|| Hold::new(limb, ankle + ledge.out * short).loose())
+        })
+        .collect()
+}
+
 // How fast the pose of the move before dies away in each move, per second. A
 // move that must have a hand or a foot somewhere at once takes over sooner.
 fn takes_over(act: Act) -> f32 {
@@ -1544,6 +1643,16 @@ pub fn present(w: &mut World, motion: Motion) {
         _ => {
             // The trunk and the free limbs first, then the holds, which reach
             // from wherever that left the shoulders and hips.
+            // The air's clips lead with the left leg, and the climb's step
+            // up with the right foot first.
+            let mirrored = match &action {
+                Action::Air => body.lead < 0.0,
+                Action::Climb(climb) => climb.first > 0.0,
+                _ => false,
+            };
+            if mirrored {
+                air::mirror(w);
+            }
             match &action {
                 Action::Hang(hanging) => sway(w, hanging),
                 Action::Air if body.leap > 0.0 => lunge(w, &body),
@@ -1565,6 +1674,9 @@ pub fn present(w: &mut World, motion: Motion) {
                         clearance(&path.ledge, at, over).max(floor(at, over))
                     }),
                     Action::Slide { .. } => lifted(w, &floor),
+                    // On a wall the feet stay out of its face.
+                    Action::Hang(hanging) => kept_out(w, &hanging.ledge),
+                    Action::Climb(climb) => kept_out(w, &climb.ledge),
                     _ => break,
                 };
                 hold::apply(w, &lifted);

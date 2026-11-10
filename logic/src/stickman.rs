@@ -217,150 +217,6 @@ fn breath(rig: &Rig) -> Clip {
     }
 }
 
-// The poses of a body in the air, by its vertical speed. `AIR` gives each its
-// speed in m/s, fastest upward first. The legs are a stride throughout, left leg
-// leading, so a landing is on the left foot and the run goes on from there.
-
-// Leaving the ground: the push leg long behind, the lead knee driving up, the
-// arms as in a stride.
-fn launch(rig: &Rig) -> Clip {
-    held(
-        rig,
-        "launch",
-        1.0,
-        &[
-            ("spine", x(0.1)),
-            ("thigh_l", x(-0.9)),
-            ("shin_l", x(1.4)),
-            ("thigh_r", x(0.5)),
-            ("shin_r", x(0.15)),
-            ("foot_r", x(0.8)),
-            ("upper_arm_l", out(1.0, 0.3, -0.6)),
-            ("forearm_l", x(-0.9)),
-            ("upper_arm_r", out(-1.0, 0.25, 1.1)),
-            ("forearm_r", x(-1.2)),
-        ],
-    )
-}
-
-// Rising: the lead knee high, the push leg folding in behind, the chest open.
-fn rise(rig: &Rig) -> Clip {
-    held(
-        rig,
-        "rise",
-        1.0,
-        &[
-            ("spine", x(-0.06)),
-            ("thigh_l", x(-0.95)),
-            ("shin_l", x(1.35)),
-            ("foot_l", x(0.2)),
-            ("thigh_r", x(0.4)),
-            ("shin_r", x(0.8)),
-            ("foot_r", x(0.55)),
-            ("upper_arm_l", out(1.0, 0.35, -0.5)),
-            ("forearm_l", x(-0.7)),
-            ("upper_arm_r", out(-1.0, 0.5, 0.9)),
-            ("forearm_r", x(-1.2)),
-        ],
-    )
-}
-
-// The top of the jump: both knees up, the arms out to the sides.
-fn float(rig: &Rig) -> Clip {
-    held(
-        rig,
-        "float",
-        1.0,
-        &[
-            ("spine", x(0.05)),
-            ("thigh_l", x(-1.0)),
-            ("shin_l", x(1.3)),
-            ("thigh_r", x(-0.35)),
-            ("shin_r", x(1.1)),
-            ("foot_r", x(0.3)),
-            ("upper_arm_l", out(1.0, 0.8, 0.25)),
-            ("forearm_l", x(-0.6)),
-            ("upper_arm_r", out(-1.0, 0.8, 0.25)),
-            ("forearm_r", x(-0.6)),
-        ],
-    )
-}
-
-// Coming down: the lead leg opens toward the ground, the other trails.
-fn fall(rig: &Rig) -> Clip {
-    held(
-        rig,
-        "fall",
-        1.0,
-        &[
-            ("spine", x(0.12)),
-            ("thigh_l", x(-0.6)),
-            ("shin_l", x(0.45)),
-            ("thigh_r", x(0.15)),
-            ("shin_r", x(0.7)),
-            ("foot_r", x(0.4)),
-            ("upper_arm_l", out(1.0, 0.7, -0.3)),
-            ("forearm_l", x(-0.5)),
-            ("upper_arm_r", out(-1.0, 0.6, 0.4)),
-            ("forearm_r", x(-0.7)),
-        ],
-    )
-}
-
-// A real drop: both legs reach down, a little bent, and the arms go wide.
-fn reach(rig: &Rig) -> Clip {
-    held(
-        rig,
-        "reach",
-        1.0,
-        &[
-            ("spine", x(0.2)),
-            ("thigh_l", x(-0.5)),
-            ("shin_l", x(0.5)),
-            ("foot_l", x(0.25)),
-            ("thigh_r", x(-0.05)),
-            ("shin_r", x(0.55)),
-            ("foot_r", x(0.25)),
-            ("upper_arm_l", out(1.0, 1.2, 0.15)),
-            ("forearm_l", x(-0.45)),
-            ("upper_arm_r", out(-1.0, 1.2, 0.15)),
-            ("forearm_r", x(-0.45)),
-        ],
-    )
-}
-
-// A fall too long to be easy: the knees come up, the chest goes forward, and the
-// arms are thrown high and back.
-fn plunge(rig: &Rig) -> Clip {
-    held(
-        rig,
-        "plunge",
-        1.0,
-        &[
-            ("spine", x(0.3)),
-            ("neck", x(-0.25)),
-            ("thigh_l", x(-0.75)),
-            ("shin_l", x(1.0)),
-            ("thigh_r", x(-0.3)),
-            ("shin_r", x(0.85)),
-            ("upper_arm_l", out(1.0, 1.6, -0.15)),
-            ("forearm_l", x(-0.3)),
-            ("upper_arm_r", out(-1.0, 1.6, -0.15)),
-            ("forearm_r", x(-0.3)),
-        ],
-    )
-}
-
-/// The air poses and the vertical speed of each, m/s.
-const AIR: [(f32, &str); 6] = [
-    (-8.5, "plunge"),
-    (-5.0, "reach"),
-    (-2.5, "fall"),
-    (0.0, "float"),
-    (1.5, "rise"),
-    (3.8, "launch"),
-];
-
 // An additive pose that the game dials in as the ground comes up: the knees and
 // hips unlock and the feet level, so the legs are already bending when they
 // touch. At its start it is nothing, at its end the whole brace.
@@ -437,10 +293,10 @@ fn land(rig: &Rig) -> Clip {
 
 // One moment of a move: how far through it is (0 to 1), how far the hips sit below a
 // stand, and the turn of each joint that is not at rest.
-struct Key {
-    at: f32,
-    drop: f32,
-    joints: &'static [(&'static str, [f32; 3])],
+pub(crate) struct Key<'a> {
+    pub at: f32,
+    pub drop: f32,
+    pub joints: &'a [(&'a str, [f32; 3])],
 }
 
 // A turn from its angles about X, then Y, then Z of the turned bone.
@@ -452,7 +308,7 @@ fn turn([about_x, about_y, about_z]: [f32; 3]) -> Quat {
 // pair of neighbours whose slope at a key is the slope between the keys either
 // side of it. A straight line from key to key would stop and turn at every key,
 // which reads as a body moved from pose to pose.
-fn through(times: &[f32], values: &[f32], t: f32) -> f32 {
+pub(crate) fn through(times: &[f32], values: &[f32], t: f32) -> f32 {
     let last = times.len() - 1;
     let i = times.partition_point(|&k| k <= t).clamp(1, last);
     let slope = |k: usize| {
@@ -472,7 +328,7 @@ fn through(times: &[f32], values: &[f32], t: f32) -> f32 {
 // sets its phase, so a move's pose follows the move and not the clock. A joint
 // absent from a key is at rest there. Between keys every angle follows a smooth
 // curve, sampled `SAMPLES` times.
-fn keyed(rig: &Rig, name: &str, seconds: f32, keys: &[Key]) -> Clip {
+pub(crate) fn keyed(rig: &Rig, name: &str, seconds: f32, keys: &[Key]) -> Clip {
     const SAMPLES: usize = 48;
     let at: Vec<f32> = keys.iter().map(|k| k.at).collect();
     let times: Vec<f32> = (0..=SAMPLES)
@@ -532,22 +388,29 @@ fn hang(rig: &Rig) -> Clip {
     keyed(rig, "hang", 1.0, &[key(0.0), key(1.0)])
 }
 
-// From the hang: pull up until the hips are at the edge, lean the chest in over
-// the top, and stand up on it. The holds put the hands on the edge and step the
-// feet onto the top; these keys are the trunk, and the limbs between holds.
+// The climb's course, from a hang to a stand on the top, in the seconds of
+// `climb::SPAN`: pull up until the chin is at the edge, lean the chest in over
+// the top and press the hips up over it, bring a knee up beside the body and
+// step onto the top, rock over that foot and stand. The right foot steps first;
+// the game mirrors the pose for the left. The holds put the hands on the edge
+// and step the feet onto the top; these keys are the trunk, and the limbs
+// between holds.
 fn climb(rig: &Rig) -> Clip {
+    use crate::climb::{CROUCHED, PRESSED, PULLED, SPAN};
     keyed(
         rig,
         "climb",
-        1.0,
+        SPAN,
         &[
             Key {
                 at: 0.0,
                 drop: 0.0,
                 joints: HANGING,
             },
+            // Pulled up: the elbows down beside the chest, the knees a little up
+            // and the chest already going in over the edge.
             Key {
-                at: 0.3,
+                at: PULLED / SPAN,
                 drop: 0.0,
                 joints: &[
                     ("upper_arm_l", [-2.3, 0.0, 0.3]),
@@ -555,63 +418,108 @@ fn climb(rig: &Rig) -> Clip {
                     ("forearm_l", [-1.7, 0.0, 0.0]),
                     ("forearm_r", [-1.7, 0.0, 0.0]),
                     ("thigh_l", [-0.25, 0.0, 0.0]),
-                    ("thigh_r", [-0.35, 0.0, 0.0]),
+                    ("thigh_r", [-0.4, 0.0, 0.0]),
                     ("shin_l", [0.7, 0.0, 0.0]),
-                    ("shin_r", [0.8, 0.0, 0.0]),
-                    // The chest is already going in over the edge.
+                    ("shin_r", [0.9, 0.0, 0.0]),
+                    ("foot_l", [0.3, 0.0, 0.0]),
+                    ("foot_r", [0.3, 0.0, 0.0]),
                     ("hips", [0.2, 0.0, 0.0]),
-                    ("spine", [0.35, 0.0, 0.0]),
+                    ("spine", [0.3, 0.0, 0.0]),
+                    ("neck", [-0.35, 0.0, 0.0]),
                 ],
             },
+            // The elbows come up over the hands, and the first knee starts up at
+            // its side.
             Key {
-                at: 0.5,
+                at: 0.46 / SPAN,
+                drop: 0.0,
+                joints: &[
+                    ("upper_arm_l", [-0.9, 0.0, 0.45]),
+                    ("upper_arm_r", [-0.9, 0.0, -0.45]),
+                    ("forearm_l", [-1.6, 0.0, 0.0]),
+                    ("forearm_r", [-1.6, 0.0, 0.0]),
+                    ("thigh_l", [-0.3, 0.0, 0.0]),
+                    ("shin_l", [0.65, 0.0, 0.0]),
+                    ("thigh_r", [-0.75, 0.0, -0.35]),
+                    ("shin_r", [1.3, 0.0, 0.0]),
+                    ("foot_l", [0.35, 0.0, 0.0]),
+                    ("hips", [0.32, 0.0, 0.0]),
+                    ("spine", [0.45, 0.0, 0.0]),
+                    ("neck", [-0.5, 0.0, 0.0]),
+                ],
+            },
+            // Pressed up: folded over the edge on arms nearly straight, the hips
+            // over it, the first knee high.
+            Key {
+                at: PRESSED / SPAN,
                 drop: 0.0,
                 joints: &[
                     ("upper_arm_l", [0.3, 0.0, 0.25]),
                     ("upper_arm_r", [0.3, 0.0, -0.25]),
                     ("forearm_l", [-0.4, 0.0, 0.0]),
                     ("forearm_r", [-0.4, 0.0, 0.0]),
-                    ("thigh_l", [-0.1, 0.0, 0.0]),
-                    ("shin_l", [0.5, 0.0, 0.0]),
-                    ("thigh_r", [-0.2, 0.0, 0.0]),
-                    ("shin_r", [0.7, 0.0, 0.0]),
-                    // Folded over the edge, the shoulders low enough to press on it.
+                    ("thigh_l", [-0.4, 0.0, 0.0]),
+                    ("shin_l", [0.8, 0.0, 0.0]),
+                    ("foot_l", [0.4, 0.0, 0.0]),
+                    ("thigh_r", [-1.35, 0.0, -0.4]),
+                    ("shin_r", [1.8, 0.0, 0.0]),
                     ("hips", [0.4, 0.0, 0.0]),
                     ("spine", [0.5, 0.0, 0.0]),
                     ("neck", [-0.6, 0.0, 0.0]),
                 ],
             },
+            // The first foot is on the top and takes the weight: the body rocks
+            // in over it, the other leg long behind.
             Key {
-                at: 0.64,
-                drop: 0.2,
+                at: 0.74 / SPAN,
+                drop: 0.16,
                 joints: &[
                     ("upper_arm_l", [-0.5, 0.0, 0.2]),
                     ("upper_arm_r", [-0.5, 0.0, -0.2]),
                     ("forearm_l", [-0.7, 0.0, 0.0]),
                     ("forearm_r", [-0.7, 0.0, 0.0]),
-                    ("thigh_l", [-0.1, 0.0, 0.0]),
-                    ("shin_l", [0.7, 0.0, 0.0]),
-                    ("thigh_r", [-1.0, 0.0, 0.0]),
-                    ("shin_r", [1.5, 0.0, 0.0]),
-                    ("hips", [0.2, 0.0, 0.0]),
+                    ("thigh_l", [-0.3, 0.0, 0.0]),
+                    ("shin_l", [1.0, 0.0, 0.0]),
+                    ("foot_l", [0.3, 0.0, 0.0]),
+                    ("thigh_r", [-1.6, 0.0, -0.15]),
+                    ("shin_r", [1.9, 0.0, 0.0]),
+                    ("hips", [0.3, 0.0, 0.0]),
                     ("spine", [0.5, 0.0, 0.0]),
                     ("neck", [-0.5, 0.0, 0.0]),
                 ],
             },
+            // Crouched on the top over both feet, the hands just off it.
             Key {
-                at: 0.8,
-                drop: 0.12,
+                at: CROUCHED / SPAN,
+                drop: 0.2,
                 joints: &[
-                    ("upper_arm_l", [-0.3, 0.0, 0.1]),
-                    ("upper_arm_r", [-0.3, 0.0, -0.1]),
-                    ("forearm_l", [-0.5, 0.0, 0.0]),
-                    ("forearm_r", [-0.5, 0.0, 0.0]),
-                    ("thigh_l", [-0.5, 0.0, 0.0]),
-                    ("thigh_r", [-0.5, 0.0, 0.0]),
-                    ("shin_l", [1.0, 0.0, 0.0]),
-                    ("shin_r", [1.0, 0.0, 0.0]),
-                    ("spine", [0.3, 0.0, 0.0]),
-                    ("neck", [-0.2, 0.0, 0.0]),
+                    ("upper_arm_l", [-0.35, 0.0, 0.12]),
+                    ("upper_arm_r", [-0.35, 0.0, -0.12]),
+                    ("forearm_l", [-0.6, 0.0, 0.0]),
+                    ("forearm_r", [-0.6, 0.0, 0.0]),
+                    ("thigh_l", [-1.0, 0.0, 0.0]),
+                    ("shin_l", [1.5, 0.0, 0.0]),
+                    ("thigh_r", [-1.2, 0.0, 0.0]),
+                    ("shin_r", [1.6, 0.0, 0.0]),
+                    ("hips", [0.15, 0.0, 0.0]),
+                    ("spine", [0.4, 0.0, 0.0]),
+                    ("neck", [-0.3, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.98 / SPAN,
+                drop: 0.05,
+                joints: &[
+                    ("upper_arm_l", [-0.1, 0.0, 0.06]),
+                    ("upper_arm_r", [-0.1, 0.0, -0.06]),
+                    ("forearm_l", [-0.35, 0.0, 0.0]),
+                    ("forearm_r", [-0.35, 0.0, 0.0]),
+                    ("thigh_l", [-0.3, 0.0, 0.0]),
+                    ("shin_l", [0.5, 0.0, 0.0]),
+                    ("thigh_r", [-0.35, 0.0, 0.0]),
+                    ("shin_r", [0.55, 0.0, 0.0]),
+                    ("spine", [0.15, 0.0, 0.0]),
+                    ("neck", [-0.1, 0.0, 0.0]),
                 ],
             },
             Key {
@@ -1056,12 +964,6 @@ pub fn model(rig: &Rig) -> Model {
             ],
         ),
         breath(rig),
-        launch(rig),
-        rise(rig),
-        float(rig),
-        fall(rig),
-        reach(rig),
-        plunge(rig),
         brace(rig),
         land(rig),
         hang(rig),
@@ -1072,6 +974,7 @@ pub fn model(rig: &Rig) -> Model {
         slide(rig),
         kneel(rig),
     ];
+    clips.extend(crate::air::clips(rig));
     clips.extend(crate::rise::clips(rig));
     clips.extend(PACES.iter().map(|p| gait::clip(rig, p)));
     let mut model = rig.model(clips);
@@ -1080,8 +983,9 @@ pub fn model(rig: &Rig) -> Model {
 }
 
 /// One state per `Act`, and from each an edge to every other on the number `act`.
-/// `move` blends the stance and the gaits along `pace` (m/s); `air` blends falling
-/// into rising along `lift` (vertical m/s). Every other state holds its clip still
+/// `move` blends the stance and the gaits along `pace` (m/s); `air` blends the jump
+/// from a stand into the one from a sprint along `stride` (m/s). Every state but
+/// `move` holds its clip still
 /// and the game sets its phase, so the pose follows the move's own progress. No
 /// state fades in: `flow` carries the pose of one move into the next.
 pub fn animator() -> Animator {
@@ -1096,7 +1000,9 @@ pub fn animator() -> Animator {
         let name = act.state();
         let state = match act {
             Act::Move => State::blend(name, locomotion.clone()),
-            Act::Air => State::blend(name, Blend::across(AIR).parameter("lift")),
+            Act::Air => {
+                State::blend(name, Blend::across(crate::air::STRIDES).parameter("stride")).speed(0.0)
+            }
             Act::Vault => State::clip(name, "vault").speed(0.0),
             Act::Hang => State::clip(name, "hang").speed(0.0),
             Act::Climb => State::clip(name, "climb").speed(0.0),
@@ -1119,7 +1025,7 @@ pub fn animator() -> Animator {
     });
     let mut animator = Animator::new(states);
     animator.set("pace", 0.0);
-    animator.set("lift", 0.0);
+    animator.set("stride", 0.0);
     animator.set("act", Act::Move.code());
     animator.set("supine", 0.0);
     animator

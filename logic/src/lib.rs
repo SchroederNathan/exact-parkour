@@ -1,9 +1,11 @@
 use exact_game::*;
 use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
+pub mod air;
 pub mod arena;
 pub mod body;
 pub mod camera;
+pub mod climb;
 pub mod debug;
 pub mod flow;
 pub mod gait;

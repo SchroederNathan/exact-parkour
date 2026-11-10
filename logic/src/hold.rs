@@ -17,7 +17,8 @@ use exact_game::*;
 /// surface its sole is on, metres.
 pub const WRIST: f32 = 0.04;
 pub const ANKLE: f32 = 0.1;
-/// Distance past its reach over which a limb lets go, metres.
+/// Distance past its reach over which a limb lets go, metres, unless its hold
+/// says another.
 const SLACK: f32 = 0.25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +75,9 @@ pub struct Hold {
     /// Where the elbow or knee bends to, from the middle of the limb, in the
     /// body's frame, if not the limb's usual way.
     pub bend: Option<Vec3>,
+    /// Distance past its reach over which the limb lets go, metres. Within it
+    /// the limb goes part of the way to the hold.
+    pub slack: f32,
 }
 impl Hold {
     pub fn new(limb: Limb, at: Vec3) -> Self {
@@ -83,7 +87,12 @@ impl Hold {
             grip: 1.0,
             flat: if limb.is_foot() { 1.0 } else { 0.0 },
             bend: None,
+            slack: SLACK,
         }
+    }
+    pub fn slack(mut self, slack: f32) -> Self {
+        self.slack = slack;
+        self
     }
     pub fn bend(mut self, bend: Vec3) -> Self {
         self.bend = Some(bend);
@@ -183,7 +192,7 @@ fn weight(model: &Model, local: &[f32], hold: &Hold, target: Vec3) -> f32 {
     let [a, b, c] = joints(model, local, hold.limb);
     let reach = a.distance(b) + b.distance(c);
     let beyond = a.distance(target) - reach;
-    hold.grip.clamp(0.0, 1.0) * (1.0 - smooth(beyond / SLACK))
+    hold.grip.clamp(0.0, 1.0) * (1.0 - smooth(beyond / hold.slack))
 }
 
 /// Turn the limbs of the drawn body onto `holds`. Call after `animation::step`.

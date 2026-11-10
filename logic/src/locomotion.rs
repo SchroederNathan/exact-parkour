@@ -136,7 +136,7 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     {
         let mut animator = w.require_mut::<Animator>(target);
         animator.set("pace", pace);
-        animator.set("lift", motion.rising);
+        animator.set("stride", motion.stride);
         animator.set("act", motion.act.code());
         animator.set("supine", if motion.supine { 1.0 } else { 0.0 });
         // The blend's clock runs `rate` times its own period.
@@ -151,7 +151,8 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     // A held clip shows the moment of the move the body is at. A phase of one
     // would wrap to the start, so the last moment is just short of it.
     let held = match motion.act {
-        Act::Move | Act::Air => None,
+        Act::Move => None,
+        Act::Air => Some(crate::air::phase(motion.rising)),
         Act::Hang => Some(0.0),
         Act::Vault | Act::Climb | Act::Roll | Act::Land | Act::Rise | Act::Slide => {
             Some(motion.progress.min(0.999))
@@ -160,9 +161,10 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     // At a stand every phase looks the same, so that is the moment to pick the one
     // the next step should start from.
     let ready = (motion.act == Act::Move && pace == 0.0 && motion.grounded).then(gait::ready);
-    // A landing is on the left foot, which the air poses lead with: the cycle
-    // starts where that foot strikes.
-    let strike = (motion.impact > 0.0 && motion.act == Act::Move).then_some(0.0);
+    // A landing is on the foot that led in the air: the cycle starts where that
+    // foot strikes.
+    let strike = (motion.impact > 0.0 && motion.act == Act::Move)
+        .then(|| crate::air::strike(motion.lead));
     if let Some(phase) = held.or(strike).or(ready) {
         if let Some(mut pose) = w.get_mut::<Pose>(target) {
             if pose.phase != phase {

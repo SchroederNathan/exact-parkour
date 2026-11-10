@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Draw a film strip of the body from the lines the `film` test writes.
 
-    python3 tools/film.py film.jsonl out.png [first] [last] [every] [columns]
+    python3 tools/film.py film.jsonl out.png [first] [last] [every] [columns] [side]
 
 Each frame is a side view (the wall's face is the vertical line, its top the
-horizontal one) over a view from behind. The left limbs are blue, the right red.
+horizontal one) over a view from behind; `side` leaves the view from behind
+out. The left limbs are blue, the right red.
 """
 import json, struct, sys, zlib
 
@@ -83,11 +84,14 @@ def main():
     last = int(sys.argv[4]) if len(sys.argv) > 4 else 10 ** 9
     every = int(sys.argv[5]) if len(sys.argv) > 5 else 6
     columns = int(sys.argv[6]) if len(sys.argv) > 6 else 10
+    both = not (len(sys.argv) > 7 and sys.argv[7] == "side")
     lines = [json.loads(l) for l in open(src)]
     head, frames = lines[0], [f for f in lines[1:] if first <= f["t"] <= last and (f["t"] - first) % every == 0]
     top = head["top"]
     scale = 95.0
-    cell_w, side_h, back_h = 250, 330, 250
+    wall = head["scene"] != "jumps"
+    cell_w, side_h = 250, 430 if wall else 300
+    back_h = side_h if both else 0
     cell_h = side_h + back_h
     rows = (len(frames) + columns - 1) // columns
     canvas = Canvas(cell_w * columns, cell_h * rows)
@@ -95,8 +99,8 @@ def main():
         ox, oy = (n % columns) * cell_w, (n // columns) * cell_h
         hips = f["j"]["hips"]
         # The side view follows the hips along the ground and keeps the height.
-        base = min(hips[1] - 1.0, top - 2.2) if head["scene"] != "jumps" else -0.1
-        base = max(base, hips[1] - 2.6)
+        # A wall's top stays where it is in the frame; open ground does.
+        base = top - 2.3 if wall else -0.1
         def side(p):
             return (ox + cell_w / 2 + (p[0] - hips[0]) * scale, oy + side_h - 20 - (p[1] - base) * scale)
         def back(p):
@@ -114,12 +118,12 @@ def main():
                 canvas.line(face, (face[0], min(oy + side_h, side((0, 0))[1])), 1.0, (120, 150, 120))
                 canvas.line(face, (ox + cell_w - 2, face[1]), 1.0, (120, 150, 120))
             edge = back((0, top, hips[2]))
-            if oy + side_h < edge[1] < oy + cell_h:
+            if both and oy + side_h < edge[1] < oy + cell_h:
                 canvas.line((ox + 2, edge[1]), (ox + cell_w - 2, edge[1]), 0.6, (120, 150, 120))
         gb = back((0, 0.0, hips[2]))
-        if oy + side_h < gb[1] < oy + cell_h:
+        if both and oy + side_h < gb[1] < oy + cell_h:
             canvas.line((ox + 2, gb[1]), (ox + cell_w - 2, gb[1]), 0.6, grey)
-        for view in (side, back):
+        for view in (side, back) if both else (side,):
             for order in (2, 0, 1) if view is side else (0, 1, 2):
                 for a, b, which in BONES:
                     if which == order:

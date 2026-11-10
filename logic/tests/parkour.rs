@@ -937,7 +937,7 @@ fn trace() {
         let j = |n: &str| hold::joint(w, n);
         let (u, kind) = match action(&game) {
             Action::Vault(p) => (p.progress(), "vault"),
-            Action::Climb(p) => (p.progress(), "climb"),
+            Action::Climb(c) => (c.progress(), "climb"),
             Action::Hang(h) => (h.time, "hang"),
             _ => (-1.0, ""),
         };
@@ -1068,7 +1068,7 @@ fn film() {
             Action::Ground => ("ground", 0.0),
             Action::Air => ("air", 0.0),
             Action::Vault(p) => ("vault", p.progress()),
-            Action::Climb(p) => ("climb", p.progress()),
+            Action::Climb(c) => ("climb", c.time),
             Action::Hang(h) => ("hang", h.time),
             Action::Roll { .. } => ("roll", 0.0),
             Action::Slide { .. } => ("slide", 0.0),
