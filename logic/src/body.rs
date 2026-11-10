@@ -690,7 +690,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         None => body.reach = (body.reach - change).max(0.0),
     }
     for dir in looks {
-        if velocity.y < 2.0 {
+        if velocity.y < 3.0 {
             let grab = ledge::probe(w, centre, dir, 0.45, GRAB_LOW, GRAB_HIGH)
                 .filter(|l| toward(l.inward()) && ledge::clear(w, l.hang()));
             if let Some(ledge) = grab {
@@ -1598,6 +1598,24 @@ fn lifted(w: &World, need: &dyn Fn(Vec3, f32) -> f32) -> Vec<Hold> {
         .collect()
 }
 
+// Swing back a thigh whose knee the pose has in the wall's face, until the knee
+// is out of it. A knee above the top is over the wall, and is left where it is.
+fn knees_out(w: &mut World, ledge: &Ledge) {
+    for _ in 0..2 {
+        for side in ["l", "r"] {
+            let knee = hold::joint(w, &format!("shin_{side}"));
+            let under = smooth((ledge.edge.y + 0.02 - knee.y) / 0.08);
+            let short = (0.07 - (knee - ledge.edge).dot(ledge.out)) * under;
+            if short > 0.0 {
+                // About the line of the edge, which takes a hanging knee
+                // straight out from the wall.
+                let back = Quat::from_axis_angle(ledge.left(), (short / 0.43).min(0.8));
+                hold::turn_in_world(w, &format!("thigh_{side}"), back);
+            }
+        }
+    }
+}
+
 // Where a foot the pose has in the wall's face must be moved out to. A foot above
 // the top is over the wall, and is left where it is.
 fn kept_out(w: &World, ledge: &Ledge) -> Vec<Hold> {
@@ -1660,6 +1678,16 @@ pub fn present(w: &mut World, motion: Motion) {
             }
             let was = w.get::<Flow>("stickman").map_or(act.code(), |flow| flow.act);
             flow::carry(w, act.code(), (was != act.code()).then(|| takes_over(act)));
+            // The wall the body is on, or is about to be on.
+            let wall = match &action {
+                Action::Hang(hanging) => Some(hanging.ledge),
+                Action::Climb(climb) => Some(climb.ledge),
+                Action::Air if body.reach > 0.0 => Some(body.ahead),
+                _ => None,
+            };
+            if let Some(wall) = &wall {
+                knees_out(w, wall);
+            }
             let holds = holds(w);
             hold::apply(w, &holds);
             // The feet go over a wall the body vaults, and stay out of the ground
@@ -1675,9 +1703,10 @@ pub fn present(w: &mut World, motion: Motion) {
                     }),
                     Action::Slide { .. } => lifted(w, &floor),
                     // On a wall the feet stay out of its face.
-                    Action::Hang(hanging) => kept_out(w, &hanging.ledge),
-                    Action::Climb(climb) => kept_out(w, &climb.ledge),
-                    _ => break,
+                    _ => match &wall {
+                        Some(wall) => kept_out(w, wall),
+                        None => break,
+                    },
                 };
                 hold::apply(w, &lifted);
             }

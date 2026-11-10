@@ -164,6 +164,25 @@ pub fn turn(w: &mut World, name: &str, by: Quat) {
     pose.local[slot..slot + 4].copy_from_slice(&turned.to_array());
 }
 
+/// Turn the joint `name` of the drawn body by `by`, about the world's axes.
+pub fn turn_in_world(w: &mut World, name: &str, by: Quat) {
+    let (_, facing) = frame(w);
+    let parent = {
+        let model = w.model(MODEL).expect("the stick man's model is generated in setup");
+        let Some(pose) = w.get::<Pose>("stickman") else {
+            return;
+        };
+        match model.nodes[node(model, name) as usize].parent {
+            Some(parent) if !pose.local.is_empty() => {
+                joint_matrix(model, &pose.local, parent).to_scale_rotation_translation().1
+            }
+            _ => Quat::IDENTITY,
+        }
+    };
+    let frame = facing * parent;
+    turn(w, name, frame.inverse() * by * frame);
+}
+
 /// Move the joint `name` of the drawn body by `by`, in its parent's frame.
 pub fn shift(w: &mut World, name: &str, by: Vec3) {
     let slot = {
