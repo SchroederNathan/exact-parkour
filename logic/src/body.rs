@@ -726,6 +726,8 @@ fn scripted(act: Act, path: &Path) -> Motion {
         act,
         progress: path.progress(),
         height: path.height,
+        // A vault leaves at a run, so the stride stays open through it.
+        speed: path.exit.length(),
         ..Motion::default()
     }
 }
@@ -898,9 +900,12 @@ pub fn holds(w: &World) -> Vec<Hold> {
         // A slide rides on the tucked foot and the hand behind, and the other
         // heel skims the ground ahead. Each is on the ground where it is, so a
         // slide down a slope or over a step still touches it.
-        Action::Slide { time, heading, .. } => {
+        Action::Slide {
+            time,
+            heading,
+            speed,
+        } => {
             let u = time / SLIDE;
-            let grip = smooth(u / 0.22) * (1.0 - smooth((u - 0.74) / 0.2));
             let feet = centre - Vec3::Y * HALF;
             let left = Vec3::Y.cross(*heading);
             let on = |ahead: f32, side: f32, over: f32| {
@@ -908,12 +913,24 @@ pub fn holds(w: &World) -> Vec<Hold> {
                 let floor = ledge::ground(w, at + Vec3::Y * 0.6, 1.5).unwrap_or(feet.y);
                 Vec3::new(at.x, floor + over, at.z)
             };
-            // The feet are on the ground before the hips come down to it.
-            let step = smooth(u / 0.1) * (1.0 - smooth((u - 0.8) / 0.2));
+            // The lead leg kicks out first, then the tucked foot is down, then
+            // the hand. Out of the slide the body rises over the tucked foot,
+            // which stays where it is on the ground while the body passes it.
+            let rise = (time - 0.78 * SLIDE).max(0.0);
+            let tucked = (0.34 - speed * SLIDE_KEEPS * rise).max(-0.35);
+            let long = 0.8 - 0.1 * smooth((u - 0.3) / 0.45);
+            let between = |from: f32, full: f32, fade: f32, gone: f32| {
+                smooth((u - from) / (full - from)) * (1.0 - smooth((u - fade) / (gone - fade)))
+            };
             vec![
-                Hold::new(Limb::FootR, on(0.34, -0.12, hold::ANKLE)).grip(step),
-                Hold::new(Limb::FootL, on(0.8, 0.1, 0.15)).grip(step).loose(),
-                Hold::new(Limb::HandL, on(-0.3, 0.36, hold::WRIST)).grip(grip),
+                Hold::new(Limb::FootR, on(tucked, -0.12, hold::ANKLE))
+                    .grip(between(0.0, 0.16, 0.9, 1.0)),
+                Hold::new(Limb::FootL, on(long, 0.1, 0.15))
+                    .grip(between(0.05, 0.27, 0.76, 0.92))
+                    .loose(),
+                Hold::new(Limb::HandL, on(-0.46, 0.4, hold::WRIST))
+                    .grip(between(0.1, 0.3, 0.7, 0.86))
+                    .bend(Vec3::new(0.5, 0.1, -0.6)),
             ]
         }
         Action::Vault(path) if path.held => vec![Hold::new(Limb::HandL, path.hand)],
@@ -1323,11 +1340,14 @@ pub fn present(w: &mut World) {
             // it slides on. Lifting an ankle turns its foot, which can put the
             // toes low again, so a second pass lifts what the first left short.
             for _ in 0..2 {
+                let floor = |at: Vec3, over: f32| {
+                    ledge::ground(w, at + Vec3::Y * 0.6, 1.5).map_or(f32::MIN, |y| y + over - 0.04)
+                };
                 let lifted = match &action {
-                    Action::Vault(path) => lifted(w, &|at, over| clearance(&path.ledge, at, over)),
-                    Action::Slide { .. } => lifted(w, &|at, over| {
-                        ledge::ground(w, at + Vec3::Y * 0.6, 1.5).map_or(f32::MIN, |y| y + over - 0.04)
+                    Action::Vault(path) => lifted(w, &|at, over| {
+                        clearance(&path.ledge, at, over).max(floor(at, over))
                     }),
+                    Action::Slide { .. } => lifted(w, &floor),
                     _ => break,
                 };
                 hold::apply(w, &lifted);

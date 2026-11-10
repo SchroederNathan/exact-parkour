@@ -690,7 +690,7 @@ fn a_slide_keeps_the_body_moving_and_ends_in_a_run() {
         assert!(over, "{what}: never ended");
         assert!(matches!(action(&game), Action::Ground), "{what}: ended {:?}", action(&game));
         assert!(lowest < 0.4, "{what}: the hips came down to {lowest} m only");
-        assert!(touched > 30, "{what}: the hand was on the ground for {touched} ticks");
+        assert!(touched > 20, "{what}: the hand was on the ground for {touched} ticks");
         let far = (feet(&game) - from).length();
         assert!(far > before * body::SLIDE * 0.85, "{what}: slid {far} m");
         // It runs on at the speed it had.
@@ -873,7 +873,7 @@ fn trace() {
     let mut game = start();
     let near: f32 = std::env::var("NEAR").map_or(0.6, |s| s.parse().unwrap());
     let back: f32 = std::env::var("BACK").map_or(3.0, |s| s.parse().unwrap());
-    approach(&mut game, block, slant, back, near, false);
+    approach(&mut game, block, slant, back, near, std::env::var("SPRINT").is_ok());
     for tick in 0..260 {
         game.run(TICK_MS);
         if std::env::var("UP").is_ok() && tick == 120 {
