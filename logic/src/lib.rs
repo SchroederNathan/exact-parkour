@@ -2,6 +2,7 @@ use exact_game::*;
 use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
 pub mod body;
+pub mod debug;
 pub mod gait;
 pub mod ledge;
 pub mod locomotion;
@@ -165,6 +166,7 @@ impl Game for ExactBeatEmUp {
     }
 
     fn tick(w: &mut World, input: &Input, _: &Options) {
+        debug::commands(w, input);
         park::tick(w);
         let motion = body::step(w, input);
         physics::step(w);
