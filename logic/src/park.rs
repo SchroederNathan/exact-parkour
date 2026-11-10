@@ -146,9 +146,11 @@ pub struct Ramp {
     pub released: u32,
 }
 
-/// Seconds between rollers, and how long each lives.
-const EVERY: f32 = 2.6;
-const LIFE: f32 = 13.0;
+/// Seconds between rollers, and how long each lives. A body that a roller knocked
+/// down needs about 3.5 s to come to rest and get up, so it is on its feet before
+/// the next one arrives.
+pub const EVERY: f32 = 4.5;
+const LIFE: f32 = 12.0;
 
 struct Kind {
     mesh: fn() -> Mesh,

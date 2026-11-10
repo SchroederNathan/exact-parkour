@@ -362,7 +362,7 @@ fn rollers_come_down_the_ramp_and_leave() {
     use exact_beat_em_up_logic::park::{Roller, RAMP_TOP};
     use exact_game_physics::Body;
     let mut game = start();
-    game.run(4000.0);
+    game.run(6000.0);
     let rollers = |game: &Sim<ExactBeatEmUp>| -> Vec<Vec3> {
         let w = game.world();
         w.query::<&Roller>()
@@ -371,13 +371,13 @@ fn rollers_come_down_the_ramp_and_leave() {
             .collect()
     };
     let now = rollers(&game);
-    assert_eq!(now.len(), 2, "one roller every 2.6 s");
+    assert_eq!(now.len(), 2, "one roller every 4.5 s");
     // The first is well down the slope and between the rails.
     assert!(now.iter().any(|p| p.z > RAMP_TOP.z + 4.0 && p.y < RAMP_TOP.y - 1.5));
     assert!(now.iter().all(|p| (p.x - RAMP_TOP.x).abs() < 2.5), "{now:?}");
     game.run(30_000.0);
     let later = rollers(&game);
-    assert!(later.len() <= 6, "rollers leave after their time: {}", later.len());
+    assert!(later.len() <= 3, "rollers leave after their time: {}", later.len());
     assert!(later.iter().all(|p| p.is_finite() && p.y > -0.5), "{later:?}");
     let w = game.world();
     assert!(w.query::<&Body>().iter().all(|(_, b)| b.velocity.is_finite()));
