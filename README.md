@@ -82,7 +82,7 @@ BLOCK=ledge-high UP=1 cargo test --manifest-path .shells/Cargo.toml -p exact-bea
 The framework checkout is at `/private/tmp/exact-framework-20261109`, which a restart of the Mac removes. To restore it:
 
 ```sh
-git clone --no-checkout /Volumes/ExternalSSD/T3Projects/exact2 /private/tmp/exact-framework-20261109
+git clone --no-checkout <path to your exact2 repository> /private/tmp/exact-framework-20261109
 git -C /private/tmp/exact-framework-20261109 checkout --detach 94b8671f7
 (cd /private/tmp/exact-framework-20261109 && bun install --frozen-lockfile)
 ```
@@ -108,10 +108,10 @@ bun exact.mjs agent web "tap play" "type world message camera 4.6 0.4 0.9" \
 ## Install on a phone
 
 ```sh
-scripts/phone.sh 00008160-00093DAE0EC0000A
+scripts/phone.sh "<phone name or UDID>"
 ```
 
-The script signs with the EAS ad hoc profile and distribution certificate in `release/credentials/` (not in git). `release/` is the EAS project `@exponathan/exact-beat-em-up`. To add a phone, register it with `eas device:create`, then run `eas credentials:configure-build -p ios -e device` and download the credentials again with `eas credentials -p ios`. The certificate is in the keychain `exact-beat-em-up-signing`.
+The script signs with the EAS ad hoc profile and distribution certificate in `release/credentials/` (not in git). `release/` is the EAS project. To add a phone, register it with `eas device:create`, then run `eas credentials:configure-build -p ios -e device` and download the credentials again with `eas credentials -p ios`. The certificate is in the keychain `exact-beat-em-up-signing`.
 
 ## TestFlight
 
@@ -119,4 +119,4 @@ The script signs with the EAS ad hoc profile and distribution certificate in `re
 scripts/testflight.sh 2
 ```
 
-The argument is the build number; raise it for each upload. EAS Build cannot build an Exact app, so the script builds the signed `.ipa` here and `eas submit` uploads it. The App Store Connect app is 6832787049, named "Rooftop Rumble (6c5aef)" there because "Rooftop Rumble" was taken. Apple processes the build after the upload. Check it with `eas submit:status -p ios --profile production --json --non-interactive` in `release/`: `processingState` is `VALID` when it is ready.
+The argument is the build number; raise it for each upload. EAS Build cannot build an Exact app, so the script builds the signed `.ipa` here and `eas submit` uploads it. Apple processes the build after the upload. Check it with `eas submit:status -p ios --profile production --json --non-interactive` in `release/`: `processingState` is `VALID` when it is ready.
