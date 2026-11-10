@@ -10,16 +10,14 @@
 use crate::gait::{self, PACES};
 use crate::stickman::LAND_LAYER;
 use exact_game::animation::Layers;
-use crate::body::Motion;
+use crate::body::{Act, Motion};
 use exact_game::*;
 
-/// The gait the legs are shaped for, and how hard the body is coming down.
+/// The gait the legs are shaped for.
 #[derive(Default, Component)]
 pub struct Stride {
     /// Speed the legs are shaped for, m/s; trails ground speed.
     pub pace: f32,
-    /// Downward speed of the last airborne tick, m/s.
-    pub sink: f32,
 }
 
 // How `pace` closes on ground speed: a share of the gap per second, plus a floor
@@ -82,16 +80,17 @@ fn to_ready(phase: f32) -> f32 {
 
 /// Set `target`'s Animator and layers for this tick; call before `animation::step`.
 pub fn drive(w: &mut World, target: &str, motion: Motion) {
-    let (speed, rising, contact) = (motion.speed, motion.rising, motion);
     let dt = w.dt();
+    let speed = motion.speed;
     let ground = speed * dt;
-    // The phase the legs were last shown at; none before the first pose, and in the
-    // air the feet answer to nothing.
+    // The feet answer to the ground only while the body runs on it.
+    let running = motion.act == Act::Move && motion.grounded && motion.impact == 0.0;
+    // The phase the legs were last shown at; none before the first pose.
     let phase = w
         .get::<Pose>(target)
         .map(|pose| pose.phase)
-        .filter(|_| contact.grounded && !contact.landed);
-    let (was, pace, sink) = {
+        .filter(|_| running);
+    let (was, pace) = {
         let mut stride = w.require_mut::<Stride>(target);
         let was = stride.pace;
         let gap = speed - was;
@@ -112,16 +111,10 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
                 pace = was + (pace - was) * paid / back;
             }
         }
-        let sink = if contact.grounded {
-            stride.sink
-        } else {
-            (-rising).max(0.0)
-        };
-        if stride.pace != pace || stride.sink != sink {
+        if stride.pace != pace {
             stride.pace = pace;
-            stride.sink = sink;
         }
-        (was, pace, sink)
+        (was, pace)
     };
 
     let (metres, period) = stride_at(pace);
@@ -141,34 +134,46 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     if let Some(phase) = phase.filter(|_| speed < STILL && pace < was && pace < PACES[0].speed) {
         advance = advance.max(to_ready(phase) * (was - pace) / was).min(most);
     }
-    {
+    let playing = {
         let mut animator = w.require_mut::<Animator>(target);
         animator.set("pace", pace);
-        animator.set("lift", rising);
-        animator.set("air", !contact.grounded);
+        animator.set("lift", motion.rising);
+        animator.set("act", motion.act.code());
+        animator.set("supine", if motion.supine { 1.0 } else { 0.0 });
         // The blend's clock runs `rate` times its own period.
         let state = animator
-            .state_mut("move")
+            .state_mut(Act::Move.state())
             .expect("the stick man's Animator has a `move` state");
         let rate = advance * period / dt;
         if state.speed != rate {
             state.speed = rate;
         }
-    }
-    // At a stand every phase looks the same, so this is the moment to pick the one
+        animator.state() == motion.act.state()
+    };
+    // A held clip shows the moment of the move the body is at. A phase of one
+    // would wrap to the start, so the last moment is just short of it.
+    let held = match motion.act {
+        Act::Move | Act::Air => None,
+        Act::Hang => Some(0.0),
+        Act::Vault | Act::Climb | Act::Roll | Act::Land | Act::Rise => {
+            Some(motion.progress.min(0.999))
+        }
+    };
+    // At a stand every phase looks the same, so that is the moment to pick the one
     // the next step should start from.
-    if pace == 0.0 && contact.grounded {
-        let ready = gait::ready();
+    let ready = (motion.act == Act::Move && pace == 0.0 && motion.grounded).then(gait::ready);
+    if let Some(phase) = held.filter(|_| playing).or(ready) {
         if let Some(mut pose) = w.get_mut::<Pose>(target) {
-            if pose.phase != ready {
-                pose.phase = ready;
+            if pose.phase != phase {
+                pose.phase = phase;
             }
         }
     }
-    if contact.landed {
+    // The knees give on a soft touchdown; a harder one has its own move.
+    if motion.impact > 0.0 && motion.act == Act::Move {
         let mut layers = w.require_mut::<Layers>(target);
         let land = &mut layers.0[LAND_LAYER];
-        land.weight = (sink / HARD_LANDING).clamp(0.35, 1.0);
+        land.weight = (motion.impact / HARD_LANDING).clamp(0.35, 1.0);
         land.animation.time = 0.0;
     }
 }

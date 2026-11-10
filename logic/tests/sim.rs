@@ -201,8 +201,11 @@ fn the_body_faces_where_it_is_going() {
 
 #[test]
 fn planted_feet_stay_planted_at_every_pace() {
-    for keys in [&["KeyW"][..], &["KeyW", "ShiftLeft"][..]] {
+    // South of the start the park is open ground.
+    for keys in [&["KeyS"][..], &["KeyS", "ShiftLeft"][..]] {
         let mut game = start();
+        game.world_mut().require_mut::<body::Parkour>("player").yaw = 0.0;
+        game.run(25.0);
         // From a stand through full acceleration: the first step pushes off a
         // planted foot.
         let (slid, went) = slip(&mut game, keys, 300.0);
@@ -352,4 +355,30 @@ fn the_forearm_follows_the_upper_arm_late() {
             pace.clip()
         );
     }
+}
+
+#[test]
+fn rollers_come_down_the_ramp_and_leave() {
+    use exact_beat_em_up_logic::park::{Roller, RAMP_TOP};
+    use exact_game_physics::Body;
+    let mut game = start();
+    game.run(4000.0);
+    let rollers = |game: &Sim<ExactBeatEmUp>| -> Vec<Vec3> {
+        let w = game.world();
+        w.query::<&Roller>()
+            .iter()
+            .map(|(e, _)| w.get::<Transform>(e).unwrap().position)
+            .collect()
+    };
+    let now = rollers(&game);
+    assert_eq!(now.len(), 2, "one roller every 2.6 s");
+    // The first is well down the slope and between the rails.
+    assert!(now.iter().any(|p| p.z > RAMP_TOP.z + 4.0 && p.y < RAMP_TOP.y - 1.5));
+    assert!(now.iter().all(|p| (p.x - RAMP_TOP.x).abs() < 2.5), "{now:?}");
+    game.run(30_000.0);
+    let later = rollers(&game);
+    assert!(later.len() <= 6, "rollers leave after their time: {}", later.len());
+    assert!(later.iter().all(|p| p.is_finite() && p.y > -0.5), "{later:?}");
+    let w = game.world();
+    assert!(w.query::<&Body>().iter().all(|(_, b)| b.velocity.is_finite()));
 }

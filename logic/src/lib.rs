@@ -3,7 +3,10 @@ use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
 pub mod body;
 pub mod gait;
+pub mod ledge;
 pub mod locomotion;
+pub mod park;
+pub mod ragdoll;
 pub mod stickman;
 
 use body::Parkour;
@@ -55,7 +58,16 @@ impl Game for ExactBeatEmUp {
             "platform",
             (
                 Transform::default(),
-                Collider::of(&ground),
+                // A metre of ground under the surface. The plane's own collider is a
+                // 1 cm slab, which the capsule dips through on its first step.
+                Collider {
+                    shape: Shape::Box {
+                        half: Vec3::new(PARK, 1.0, PARK),
+                    },
+                    offset: Vec3::new(0.0, -1.0, 0.0),
+                    layer: park::SOLID,
+                    ..Collider::default()
+                },
                 ground,
                 Material::grid(Color::hex("#365466"), 1.0),
             ),
@@ -82,6 +94,8 @@ impl Game for ExactBeatEmUp {
             );
         }
 
+        park::setup(w);
+
         let rig = stickman::rig(body::HEIGHT);
         let player_mesh = w
             .generated_model(stickman::MODEL, stickman::model(&rig))
@@ -98,10 +112,15 @@ impl Game for ExactBeatEmUp {
                     height: body::HEIGHT,
                     ..CapsuleController::default()
                 },
+                Collider {
+                    layer: park::BODY,
+                    ..Collider::default()
+                },
                 Parkour {
                     yaw: half_turn,
                     ..Parkour::default()
                 },
+                ragdoll::Ragdoll::default(),
                 Player,
             ),
         );
@@ -145,9 +164,11 @@ impl Game for ExactBeatEmUp {
     }
 
     fn tick(w: &mut World, input: &Input, _: &Options) {
+        park::tick(w);
         let motion = body::step(w, input);
         physics::step(w);
         locomotion::drive(w, "stickman", motion);
         animation::step(w);
+        body::present(w);
     }
 }

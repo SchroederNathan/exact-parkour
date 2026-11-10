@@ -4,6 +4,7 @@
 //! family of gaits in `gait::PACES`.
 use exact_game::animation::{Layer, Layers, Param};
 use exact_game::asset::{Clip, Interpolation, Model, Track, TrackPath};
+use crate::body::Act;
 use crate::gait::{self, PACES};
 use exact_game::rig::{Limb, Rig};
 use exact_game::*;
@@ -299,6 +300,536 @@ fn land(rig: &Rig) -> Clip {
     }
 }
 
+// One moment of a move: how far through it is (0 to 1), how far the hips sit below a
+// stand, and the turn of each joint that is not at rest.
+struct Key {
+    at: f32,
+    drop: f32,
+    joints: &'static [(&'static str, [f32; 3])],
+}
+
+// A turn from its angles about X, then Y, then Z of the turned bone.
+fn turn([about_x, about_y, about_z]: [f32; 3]) -> Quat {
+    Quat::from_rotation_z(about_z) * Quat::from_rotation_y(about_y) * Quat::from_rotation_x(about_x)
+}
+
+// A clip `seconds` long through `keys`. The Animator holds it still and the game
+// sets its phase, so a move's pose follows the move and not the clock. A joint
+// absent from a key is at rest there.
+fn keyed(rig: &Rig, name: &str, seconds: f32, keys: &[Key]) -> Clip {
+    let times: Vec<f32> = keys.iter().map(|k| k.at * seconds).collect();
+    let mut bones: Vec<&str> = keys
+        .iter()
+        .flat_map(|k| k.joints.iter().map(|j| j.0))
+        .collect();
+    bones.sort_unstable();
+    bones.dedup();
+    let mut tracks: Vec<Track> = bones
+        .into_iter()
+        .map(|bone| {
+            let at = |i: usize| {
+                keys[i]
+                    .joints
+                    .iter()
+                    .find(|j| j.0 == bone)
+                    .map_or(Quat::IDENTITY, |j| turn(j.1))
+            };
+            Track {
+                node: node(rig, bone),
+                path: TrackPath::Rotation,
+                interpolation: Interpolation::Linear,
+                times: times.clone(),
+                values: (0..keys.len()).flat_map(|i| at(i).to_array()).collect(),
+            }
+        })
+        .collect();
+    let rest = rig.bones()[node(rig, "hips") as usize].head;
+    tracks.push(Track {
+        node: node(rig, "hips"),
+        path: TrackPath::Translation,
+        interpolation: Interpolation::Linear,
+        times,
+        values: keys
+            .iter()
+            .flat_map(|k| (rest - Vec3::Y * k.drop).to_array())
+            .collect(),
+    });
+    Clip {
+        name: name.into(),
+        tracks,
+        markers: vec![],
+    }
+}
+
+// Hanging by the hands: arms straight up, legs loose.
+const HANGING: &[(&str, [f32; 3])] = &[
+    ("upper_arm_l", [-3.0, 0.0, 0.08]),
+    ("upper_arm_r", [-3.0, 0.0, -0.08]),
+    ("forearm_l", [-0.1, 0.0, 0.0]),
+    ("forearm_r", [-0.1, 0.0, 0.0]),
+    ("thigh_l", [-0.15, 0.0, 0.0]),
+    ("thigh_r", [0.05, 0.0, 0.0]),
+    ("shin_l", [0.35, 0.0, 0.0]),
+    ("shin_r", [0.3, 0.0, 0.0]),
+    ("foot_l", [0.4, 0.0, 0.0]),
+    ("foot_r", [0.4, 0.0, 0.0]),
+    ("neck", [-0.25, 0.0, 0.0]),
+];
+
+fn hang(rig: &Rig) -> Clip {
+    let key = |at| Key {
+        at,
+        drop: 0.0,
+        joints: HANGING,
+    };
+    keyed(rig, "hang", 1.0, &[key(0.0), key(1.0)])
+}
+
+// From the hang: pull the chest to the edge, press down on it, bring a knee up
+// onto the top, and stand.
+fn climb(rig: &Rig) -> Clip {
+    keyed(
+        rig,
+        "climb",
+        1.0,
+        &[
+            Key {
+                at: 0.0,
+                drop: 0.0,
+                joints: HANGING,
+            },
+            Key {
+                at: 0.3,
+                drop: 0.0,
+                joints: &[
+                    ("upper_arm_l", [-2.3, 0.0, 0.3]),
+                    ("upper_arm_r", [-2.3, 0.0, -0.3]),
+                    ("forearm_l", [-1.7, 0.0, 0.0]),
+                    ("forearm_r", [-1.7, 0.0, 0.0]),
+                    ("thigh_l", [-0.5, 0.0, 0.0]),
+                    ("thigh_r", [-0.2, 0.0, 0.0]),
+                    ("shin_l", [0.9, 0.0, 0.0]),
+                    ("shin_r", [0.6, 0.0, 0.0]),
+                    ("spine", [0.15, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.6,
+                drop: 0.1,
+                joints: &[
+                    ("upper_arm_l", [0.5, 0.0, 0.25]),
+                    ("upper_arm_r", [0.5, 0.0, -0.25]),
+                    ("forearm_l", [-1.5, 0.0, 0.0]),
+                    ("forearm_r", [-1.5, 0.0, 0.0]),
+                    ("thigh_l", [-0.3, 0.0, 0.0]),
+                    ("thigh_r", [-1.9, 0.0, 0.0]),
+                    ("shin_l", [0.5, 0.0, 0.0]),
+                    ("shin_r", [1.9, 0.0, 0.0]),
+                    ("spine", [0.7, 0.0, 0.0]),
+                    ("neck", [-0.4, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.82,
+                drop: 0.42,
+                joints: &[
+                    ("upper_arm_l", [-0.7, 0.0, 0.1]),
+                    ("upper_arm_r", [-0.7, 0.0, -0.1]),
+                    ("forearm_l", [-0.6, 0.0, 0.0]),
+                    ("forearm_r", [-0.6, 0.0, 0.0]),
+                    ("thigh_l", [-1.0, 0.0, 0.0]),
+                    ("thigh_r", [-1.0, 0.0, 0.0]),
+                    ("shin_l", [2.0, 0.0, 0.0]),
+                    ("shin_r", [2.0, 0.0, 0.0]),
+                    ("foot_l", [-1.0, 0.0, 0.0]),
+                    ("foot_r", [-1.0, 0.0, 0.0]),
+                    ("spine", [0.55, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 1.0,
+                drop: 0.0,
+                joints: &[],
+            },
+        ],
+    )
+}
+
+// Over a low wall: the left hand goes down on the top, both knees come up and
+// swing through beside it, and the legs reach for the far side.
+fn vault(rig: &Rig) -> Clip {
+    keyed(
+        rig,
+        "vault",
+        1.0,
+        &[
+            Key {
+                at: 0.0,
+                drop: 0.05,
+                joints: &[
+                    ("spine", [0.3, 0.0, 0.0]),
+                    ("upper_arm_l", [-1.1, 0.0, 0.0]),
+                    ("forearm_l", [-0.3, 0.0, 0.0]),
+                    ("upper_arm_r", [0.5, 0.0, 0.0]),
+                    ("forearm_r", [-0.9, 0.0, 0.0]),
+                    ("thigh_l", [0.4, 0.0, 0.0]),
+                    ("shin_l", [0.5, 0.0, 0.0]),
+                    ("thigh_r", [-0.9, 0.0, 0.0]),
+                    ("shin_r", [1.2, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.3,
+                drop: 0.15,
+                joints: &[
+                    ("hips", [0.0, 0.0, 0.2]),
+                    ("spine", [0.5, 0.0, 0.0]),
+                    ("upper_arm_l", [-0.6, 0.0, 0.25]),
+                    ("forearm_l", [-0.1, 0.0, 0.0]),
+                    ("upper_arm_r", [0.2, 0.0, -0.6]),
+                    ("forearm_r", [-0.8, 0.0, 0.0]),
+                    ("thigh_l", [-1.0, 0.0, 0.0]),
+                    ("shin_l", [1.7, 0.0, 0.0]),
+                    ("thigh_r", [-1.6, 0.0, 0.0]),
+                    ("shin_r", [1.9, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.55,
+                drop: 0.3,
+                joints: &[
+                    ("hips", [0.0, 0.0, 0.45]),
+                    ("spine", [0.55, 0.0, -0.2]),
+                    ("upper_arm_l", [0.1, 0.0, 0.5]),
+                    ("forearm_l", [0.0, 0.0, 0.0]),
+                    ("upper_arm_r", [-0.3, 0.0, -0.9]),
+                    ("forearm_r", [-0.6, 0.0, 0.0]),
+                    ("thigh_l", [-1.8, 0.0, 0.0]),
+                    ("shin_l", [1.9, 0.0, 0.0]),
+                    ("thigh_r", [-1.8, 0.0, 0.0]),
+                    ("shin_r", [1.8, 0.0, 0.0]),
+                    ("neck", [-0.3, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.8,
+                drop: 0.12,
+                joints: &[
+                    ("hips", [0.0, 0.0, 0.15]),
+                    ("spine", [0.25, 0.0, 0.0]),
+                    ("upper_arm_l", [0.8, 0.0, 0.3]),
+                    ("forearm_l", [-0.4, 0.0, 0.0]),
+                    ("upper_arm_r", [-0.5, 0.0, -0.3]),
+                    ("forearm_r", [-0.7, 0.0, 0.0]),
+                    ("thigh_l", [-1.0, 0.0, 0.0]),
+                    ("shin_l", [0.7, 0.0, 0.0]),
+                    ("thigh_r", [-0.6, 0.0, 0.0]),
+                    ("shin_r", [1.0, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 1.0,
+                drop: 0.05,
+                joints: &[
+                    ("spine", [0.15, 0.0, 0.0]),
+                    ("upper_arm_l", [0.3, 0.0, 0.0]),
+                    ("forearm_l", [-0.7, 0.0, 0.0]),
+                    ("upper_arm_r", [-0.3, 0.0, 0.0]),
+                    ("forearm_r", [-0.7, 0.0, 0.0]),
+                    ("thigh_l", [-0.5, 0.0, 0.0]),
+                    ("shin_l", [0.4, 0.0, 0.0]),
+                    ("thigh_r", [0.1, 0.0, 0.0]),
+                    ("shin_r", [0.6, 0.0, 0.0]),
+                ],
+            },
+        ],
+    )
+}
+
+// A hard landing with nowhere to roll: down to the hands, then up. The thigh, shin
+// and foot turn by -a, 2a and -a, which keeps the foot flat under the hip while the
+// hips come down by the height the bent leg lost.
+fn crouch(rig: &Rig) -> Clip {
+    let leg = {
+        let bone = |name: &str| {
+            let b = &rig.bones()[node(rig, name) as usize];
+            (b.head - b.tail).length()
+        };
+        bone("thigh_l") + bone("shin_l")
+    };
+    // How deep the knees are bent through the move, 0 to 1: down fast, up slowly.
+    let depth = |u: f32| {
+        if u < 0.18 {
+            smooth(u / 0.18)
+        } else {
+            1.0 - smooth((u - 0.3).max(0.0) / 0.7)
+        }
+    };
+    const BEND: f32 = 1.15;
+    let times: Vec<f32> = (0..=20).map(|i| i as f32 / 20.0).collect();
+    let mut tracks = vec![
+        hips(rig, &times, |u| leg * (1.0 - math::cos(BEND * depth(u)))),
+        rotation(node(rig, "spine"), &times, |u| x(0.75 * depth(u))),
+        rotation(node(rig, "neck"), &times, |u| x(-0.5 * depth(u))),
+    ];
+    for (side, away) in [("l", 1.0), ("r", -1.0)] {
+        let bone = |name: &str| node(rig, &format!("{name}_{side}"));
+        tracks.push(rotation(bone("thigh"), &times, |u| x(-BEND * depth(u))));
+        tracks.push(rotation(bone("shin"), &times, |u| x(2.0 * BEND * depth(u))));
+        tracks.push(rotation(bone("foot"), &times, |u| x(-BEND * depth(u))));
+        // The hands go down to the ground in front of the feet.
+        tracks.push(rotation(bone("upper_arm"), &times, move |u| {
+            out(away, 0.25 * depth(u), 0.95 * depth(u))
+        }));
+        tracks.push(rotation(bone("forearm"), &times, |u| x(-0.2 - 0.25 * depth(u))));
+    }
+    Clip {
+        name: "crouch".into(),
+        tracks,
+        markers: vec![],
+    }
+}
+
+// A forward roll: the body curls into a ball that turns once about its middle,
+// 0.45 m above the ground, and uncurls onto its feet.
+fn roll(rig: &Rig) -> Clip {
+    let times: Vec<f32> = (0..=32).map(|i| i as f32 / 32.0).collect();
+    // How tightly the body is curled, and how far it has turned.
+    let curl = |u: f32| smooth(u / 0.2) * (1.0 - smooth((u - 0.78) / 0.22));
+    let spin = |u: f32| std::f32::consts::TAU * smooth((u - 0.08) / 0.8);
+    let rest = rig.bones()[node(rig, "hips") as usize].head;
+    // The hips ride the rim of the ball: its middle is in front of the belly.
+    let hips_at = move |u: f32| {
+        let ball = Vec3::new(0.0, 0.45, 0.0);
+        let rim = Quat::from_rotation_x(spin(u)) * Vec3::new(0.0, 0.25, 0.2);
+        rest.lerp(ball - rim, curl(u))
+    };
+    let mut tracks = vec![
+        Track {
+            node: node(rig, "hips"),
+            path: TrackPath::Translation,
+            interpolation: Interpolation::Linear,
+            times: times.clone(),
+            values: times.iter().flat_map(|&u| hips_at(u).to_array()).collect(),
+        },
+        rotation(node(rig, "hips"), &times, |u| x(spin(u))),
+        rotation(node(rig, "spine"), &times, |u| x(0.55 * curl(u))),
+        rotation(node(rig, "chest"), &times, |u| x(0.35 * curl(u))),
+        rotation(node(rig, "neck"), &times, |u| x(0.5 * curl(u))),
+    ];
+    for (side, away) in [("l", 1.0), ("r", -1.0)] {
+        let bone = |name: &str| node(rig, &format!("{name}_{side}"));
+        tracks.push(rotation(bone("thigh"), &times, |u| x(-2.0 * curl(u))));
+        tracks.push(rotation(bone("shin"), &times, |u| x(2.3 * curl(u))));
+        tracks.push(rotation(bone("upper_arm"), &times, move |u| {
+            out(away, 0.3 * curl(u), 1.1 * curl(u))
+        }));
+        tracks.push(rotation(bone("forearm"), &times, |u| x(-0.2 - 1.6 * curl(u))));
+    }
+    Clip {
+        name: "roll".into(),
+        tracks,
+        markers: vec![],
+    }
+}
+
+// Up from lying on the front, head toward +Z: the hands come in beside the chest
+// and push it up, the knees come under, one foot steps through, and the body
+// stands over it.
+fn rise_prone(rig: &Rig) -> Clip {
+    keyed(
+        rig,
+        "rise-prone",
+        1.0,
+        &[
+            Key {
+                at: 0.0,
+                drop: 0.84,
+                joints: &[
+                    ("hips", [1.5, 0.0, 0.0]),
+                    ("upper_arm_l", [-2.6, 0.0, 0.5]),
+                    ("upper_arm_r", [-2.6, 0.0, -0.5]),
+                    ("forearm_l", [-0.6, 0.0, 0.0]),
+                    ("forearm_r", [-0.6, 0.0, 0.0]),
+                    ("neck", [-0.3, 0.0, 0.0]),
+                    ("foot_l", [0.8, 0.0, 0.0]),
+                    ("foot_r", [0.8, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.2,
+                drop: 0.84,
+                joints: &[
+                    ("hips", [1.5, 0.0, 0.0]),
+                    ("upper_arm_l", [0.2, 0.0, 0.9]),
+                    ("upper_arm_r", [0.2, 0.0, -0.9]),
+                    ("forearm_l", [-2.3, 0.0, 0.0]),
+                    ("forearm_r", [-2.3, 0.0, 0.0]),
+                    ("neck", [-0.4, 0.0, 0.0]),
+                    ("foot_l", [0.8, 0.0, 0.0]),
+                    ("foot_r", [0.8, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.42,
+                drop: 0.74,
+                joints: &[
+                    ("hips", [1.25, 0.0, 0.0]),
+                    ("spine", [-0.45, 0.0, 0.0]),
+                    ("upper_arm_l", [-1.0, 0.0, 0.2]),
+                    ("upper_arm_r", [-1.0, 0.0, -0.2]),
+                    ("forearm_l", [-0.25, 0.0, 0.0]),
+                    ("forearm_r", [-0.25, 0.0, 0.0]),
+                    ("neck", [-0.5, 0.0, 0.0]),
+                    ("thigh_l", [-0.2, 0.0, 0.0]),
+                    ("thigh_r", [-0.2, 0.0, 0.0]),
+                    ("foot_l", [0.3, 0.0, 0.0]),
+                    ("foot_r", [0.3, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.62,
+                drop: 0.52,
+                joints: &[
+                    ("hips", [1.05, 0.0, 0.0]),
+                    ("spine", [-0.1, 0.0, 0.0]),
+                    ("upper_arm_l", [-1.25, 0.0, 0.15]),
+                    ("upper_arm_r", [-1.25, 0.0, -0.15]),
+                    ("forearm_l", [-0.15, 0.0, 0.0]),
+                    ("forearm_r", [-0.15, 0.0, 0.0]),
+                    ("neck", [-0.5, 0.0, 0.0]),
+                    ("thigh_l", [-2.1, 0.0, 0.0]),
+                    ("thigh_r", [-2.1, 0.0, 0.0]),
+                    ("shin_l", [2.2, 0.0, 0.0]),
+                    ("shin_r", [2.2, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.8,
+                drop: 0.46,
+                joints: &[
+                    ("hips", [0.55, 0.0, 0.0]),
+                    ("spine", [0.2, 0.0, 0.0]),
+                    ("upper_arm_l", [-0.9, 0.0, 0.1]),
+                    ("upper_arm_r", [-0.5, 0.0, -0.2]),
+                    ("forearm_l", [-0.5, 0.0, 0.0]),
+                    ("forearm_r", [-0.3, 0.0, 0.0]),
+                    ("neck", [-0.3, 0.0, 0.0]),
+                    ("thigh_l", [-2.0, 0.0, 0.0]),
+                    ("shin_l", [1.5, 0.0, 0.0]),
+                    ("thigh_r", [-0.6, 0.0, 0.0]),
+                    ("shin_r", [1.9, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 1.0,
+                drop: 0.0,
+                joints: &[],
+            },
+        ],
+    )
+}
+
+// Up from lying on the back, head toward -Z: sit up onto the hands, draw the feet
+// in, rock forward over them, and stand.
+fn rise_supine(rig: &Rig) -> Clip {
+    keyed(
+        rig,
+        "rise-supine",
+        1.0,
+        &[
+            Key {
+                at: 0.0,
+                drop: 0.84,
+                joints: &[
+                    ("hips", [-1.5, 0.0, 0.0]),
+                    ("upper_arm_l", [0.0, 0.0, 1.0]),
+                    ("upper_arm_r", [0.0, 0.0, -1.0]),
+                ],
+            },
+            Key {
+                at: 0.22,
+                drop: 0.83,
+                joints: &[
+                    ("hips", [-1.0, 0.0, 0.0]),
+                    ("spine", [0.3, 0.0, 0.0]),
+                    ("upper_arm_l", [1.0, 0.0, 0.35]),
+                    ("upper_arm_r", [1.0, 0.0, -0.35]),
+                    ("forearm_l", [-0.3, 0.0, 0.0]),
+                    ("forearm_r", [-0.3, 0.0, 0.0]),
+                    ("thigh_l", [-0.9, 0.0, 0.0]),
+                    ("thigh_r", [-0.7, 0.0, 0.0]),
+                    ("shin_l", [1.3, 0.0, 0.0]),
+                    ("shin_r", [1.0, 0.0, 0.0]),
+                    ("neck", [0.3, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.45,
+                drop: 0.8,
+                joints: &[
+                    ("hips", [-0.35, 0.0, 0.0]),
+                    ("spine", [0.35, 0.0, 0.0]),
+                    ("upper_arm_l", [0.55, 0.0, 0.3]),
+                    ("upper_arm_r", [0.55, 0.0, -0.3]),
+                    ("forearm_l", [-0.15, 0.0, 0.0]),
+                    ("forearm_r", [-0.15, 0.0, 0.0]),
+                    ("thigh_l", [-1.75, 0.0, 0.0]),
+                    ("thigh_r", [-1.75, 0.0, 0.0]),
+                    ("shin_l", [2.2, 0.0, 0.0]),
+                    ("shin_r", [2.2, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.66,
+                drop: 0.5,
+                joints: &[
+                    ("hips", [0.55, 0.0, 0.0]),
+                    ("spine", [0.3, 0.0, 0.0]),
+                    ("upper_arm_l", [-1.1, 0.0, 0.1]),
+                    ("upper_arm_r", [-1.1, 0.0, -0.1]),
+                    ("forearm_l", [-0.3, 0.0, 0.0]),
+                    ("forearm_r", [-0.3, 0.0, 0.0]),
+                    ("thigh_l", [-2.3, 0.0, 0.0]),
+                    ("thigh_r", [-2.3, 0.0, 0.0]),
+                    ("shin_l", [2.4, 0.0, 0.0]),
+                    ("shin_r", [2.4, 0.0, 0.0]),
+                    ("foot_l", [-0.65, 0.0, 0.0]),
+                    ("foot_r", [-0.65, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.85,
+                drop: 0.28,
+                joints: &[
+                    ("hips", [0.3, 0.0, 0.0]),
+                    ("spine", [0.2, 0.0, 0.0]),
+                    ("upper_arm_l", [-0.6, 0.0, 0.05]),
+                    ("upper_arm_r", [-0.6, 0.0, -0.05]),
+                    ("forearm_l", [-0.4, 0.0, 0.0]),
+                    ("forearm_r", [-0.4, 0.0, 0.0]),
+                    ("thigh_l", [-1.3, 0.0, 0.0]),
+                    ("thigh_r", [-1.3, 0.0, 0.0]),
+                    ("shin_l", [1.6, 0.0, 0.0]),
+                    ("shin_r", [1.6, 0.0, 0.0]),
+                    ("foot_l", [-0.6, 0.0, 0.0]),
+                    ("foot_r", [-0.6, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 1.0,
+                drop: 0.0,
+                joints: &[],
+            },
+        ],
+    )
+}
+
+fn smooth(u: f32) -> f32 {
+    let u = u.clamp(0.0, 1.0);
+    u * u * (3.0 - 2.0 * u)
+}
+
 /// The skinned model with every clip the Animator and its layers name.
 pub fn model(rig: &Rig) -> Model {
     let mut clips = vec![
@@ -322,14 +853,23 @@ pub fn model(rig: &Rig) -> Model {
         rise(rig),
         fall(rig),
         land(rig),
+        hang(rig),
+        climb(rig),
+        vault(rig),
+        crouch(rig),
+        roll(rig),
+        rise_prone(rig),
+        rise_supine(rig),
     ];
     clips.extend(PACES.iter().map(|p| gait::clip(rig, p)));
     rig.model(clips)
 }
 
+/// One state per `Act`, and from each an edge to every other on the number `act`.
 /// `move` blends the stance and the gaits along `pace` (m/s); `air` blends falling
-/// into rising along `lift` (vertical m/s). The flag `air` moves between them, each
-/// way through a short fade from the pose the body was in.
+/// into rising along `lift` (vertical m/s). Every other state holds its clip still
+/// and the game sets its phase, so the pose follows the move's own progress. Each
+/// change fades from the pose the body was in.
 pub fn animator() -> Animator {
     let mut knots = vec![(0.0, "stand".to_string())];
     knots.extend(PACES.iter().map(|p| (p.speed, p.clip())));
@@ -338,21 +878,39 @@ pub fn animator() -> Animator {
         ..Blend::default()
     }
     .parameter("pace");
-    let airborne = |value: bool| Condition::Arg("air".into(), Cmp::Eq, Param::Flag(value));
-    let mut animator = Animator::new([
-        State::blend("move", locomotion)
-            .fade(0.14)
-            .to("air", airborne(true)),
-        State::blend(
-            "air",
-            Blend::across([(-2.5, "fall"), (2.5, "rise")]).parameter("lift"),
-        )
-        .fade(0.1)
-        .to("move", airborne(false)),
-    ]);
+    let states = Act::ALL.map(|act| {
+        let name = act.state();
+        let state = match act {
+            Act::Move => State::blend(name, locomotion.clone()).fade(0.14),
+            Act::Air => State::blend(
+                name,
+                Blend::across([(-2.5, "fall"), (2.5, "rise")]).parameter("lift"),
+            )
+            .fade(0.1),
+            Act::Vault => State::clip(name, "vault").speed(0.0).fade(0.08),
+            Act::Hang => State::clip(name, "hang").speed(0.0).fade(0.12),
+            Act::Climb => State::clip(name, "climb").speed(0.0).fade(0.1),
+            Act::Roll => State::clip(name, "roll").speed(0.0).fade(0.06),
+            Act::Land => State::clip(name, "crouch").speed(0.0).fade(0.05),
+            Act::Rise => State::blend(
+                name,
+                Blend::across([(0.0, "rise-prone"), (1.0, "rise-supine")]).parameter("supine"),
+            )
+            .speed(0.0),
+        };
+        Act::ALL
+            .into_iter()
+            .filter(|other| *other != act)
+            .fold(state, |state, other| {
+                let is = Condition::Arg("act".into(), Cmp::Eq, Param::Number(other.code()));
+                state.to(other.state(), is)
+            })
+    });
+    let mut animator = Animator::new(states);
     animator.set("pace", 0.0);
     animator.set("lift", 0.0);
-    animator.set("air", false);
+    animator.set("act", Act::Move.code());
+    animator.set("supine", 0.0);
     animator
 }
 
