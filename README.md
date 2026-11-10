@@ -18,10 +18,18 @@ Jump is the one parkour button. What it does depends on what is in front of the 
 
 | Situation | Result |
 |---|---|
-| A wall up to 1.15 m high and 1.2 m deep | Vault over it, at any approach angle up to 45 degrees |
+| A wall up to 1.15 m high and 1.2 m deep | Vault over it, at any approach angle up to 45 degrees. The body leans on its left hand, which is on the wall's top |
 | A deeper or taller wall, up to 1.5 m | Climb onto it |
-| In the air at an edge 1.45 to 2.4 m above the feet | Grab the edge and hang. Jump or push toward the wall to climb. Push away to let go |
+| In the air at an edge 1.45 to 2.1 m above the feet | Grab the edge and hang |
 | In the air at a lower edge | Pull straight onto it |
+
+A hanging body stays on the edge until the stick stops pushing at the wall. After that:
+
+| Stick | Result |
+|---|---|
+| Along the wall | Shimmy that way, hand over hand, as far as the edge goes |
+| Toward the wall, or Jump | Climb onto the top |
+| Away from the wall | Let go |
 
 Landings depend on the downward speed at touchdown.
 
@@ -37,7 +45,8 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 - `logic/src/lib.rs`: setup and the tick.
 - `logic/src/body.rs`: the capsule and `Action`, the one state for what the body does. `step` is the only place an action becomes another.
-- `logic/src/ledge.rs`: finds the top edge of a wall with the physics queries. The vault, the climb and the grab all use it.
+- `logic/src/ledge.rs`: finds the top edge of a wall with the physics queries. The vault, the climb, the grab and the shimmy all use it.
+- `logic/src/hold.rs`: what the hands and feet hold. A move names the points on the wall, and after the Animator has posed the body the engine's two-bone solver puts each wrist and ankle on its point. A limb holds only what it can reach.
 - `logic/src/park.rs`: the park as one table of blocks, and the ramp's rollers.
 - `logic/src/ragdoll.rs`: fifteen points held together by constraints. The engine's physics has no joints, so the ragdoll is solved here and collides through the physics queries.
 - `logic/src/rise.rs`: the two get-ups. Each is a list of stages that place the hips, wrists and ankles; the engine's two-bone solver turns the limbs to reach them, so a planted hand or foot does not move.
@@ -48,11 +57,17 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 29 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 31 hostless tests and the determinism lints.
 
-- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, the roof gaps, drops and stairs.
+- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
+
+To see one move tick by tick, run the ignored `trace` test. It prints where the hips, shoulders and holds are and which bone, if any, is in the wall:
+
+```sh
+BLOCK=ledge-high UP=1 cargo test --manifest-path .shells/Cargo.toml -p exact-beat-em-up-logic --test parkour trace -- --ignored --nocapture
+```
 
 `.cargo/config.toml` turns off debug assertions for the vendored `rapier3d` package only. Its island check panics when the player's kinematic capsule moves in the tick in which a rigid body starts a contact.
 

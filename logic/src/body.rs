@@ -740,11 +740,12 @@ pub fn holds(w: &World) -> Vec<Hold> {
             // A foot comes up outside the wall's face to over its top, knee out to
             // the side, and then goes in onto the top, where it stands. It starts
             // when the feet's level is `from` metres from the edge and is down
-            // at `to`, and no sooner than the climb is well begun.
-            let step = |limb: Limb, side: f32, from: f32, to: f32| {
+            // at `to`, and no sooner than the climb is well begun. `clear` is how
+            // far out from the face it comes up, metres.
+            let step = |limb: Limb, side: f32, from: f32, to: f32, clear: f32| {
                 let gate = smooth((level - from) / (to - from)).min(smooth(path.progress() / 0.45));
                 let beside = ledge.left() * (side * 0.09);
-                let lifted = ledge.edge + ledge.out * 0.32 + beside + Vec3::Y * 0.2;
+                let lifted = ledge.edge + ledge.out * clear + beside + Vec3::Y * 0.2;
                 let down = stand + beside - ledge.inward() * 0.03 + Vec3::Y * hold::ANKLE;
                 let carry = smooth((gate - 0.5) / 0.5);
                 let knee = Vec3::new(side * 0.8, 0.3, 0.2).lerp(Vec3::new(side * 0.1, 0.3, 0.8), carry);
@@ -754,9 +755,10 @@ pub fn holds(w: &World) -> Vec<Hold> {
             };
             let mut holds = grips(ledge, path.travel).to_vec();
             // One foot goes onto the top as the hips reach it, and the body stands
-            // up over that foot. The other follows when the body is over the top.
-            holds.push(step(Limb::FootR, -1.0, -1.3, -0.7));
-            holds.push(step(Limb::FootL, 1.0, -0.9, -0.3));
+            // up over that foot. The other follows when the body is over the top,
+            // and so comes up closer to the face.
+            holds.push(step(Limb::FootR, -1.0, -1.3, -0.7, 0.32));
+            holds.push(step(Limb::FootL, 1.0, -0.9, -0.3, 0.2));
             holds
         }
         _ => vec![],
