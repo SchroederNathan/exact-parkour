@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PROFILE=${EXACT_PROFILE:-$ROOT/release/credentials/ios/profile.mobileprovision}
+PROFILE=${EXACT_PROFILE:-$ROOT/release/credentials/ios/adhoc.mobileprovision}
 SIGNING="$HOME/Library/Keychains/exact-beat-em-up-signing.keychain-db"
 [ -f "$PROFILE" ] || { echo "No provisioning profile at $PROFILE"; exit 1; }
 if [ -f "$SIGNING" ]; then

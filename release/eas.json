@@ -1,10 +1,22 @@
 {
   "cli": {
-    "version": ">= 21.4.0"
+    "version": ">= 21.4.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "device": {
       "distribution": "internal"
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6832787049"
+      }
     }
   }
 }

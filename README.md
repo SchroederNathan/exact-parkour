@@ -81,3 +81,11 @@ scripts/phone.sh 00008160-00093DAE0EC0000A
 ```
 
 The script signs with the EAS ad hoc profile and distribution certificate in `release/credentials/` (not in git). `release/` is the EAS project `@exponathan/exact-beat-em-up`. To add a phone, register it with `eas device:create`, then run `eas credentials:configure-build -p ios -e device` and download the credentials again with `eas credentials -p ios`. The certificate is in the keychain `exact-beat-em-up-signing`.
+
+## TestFlight
+
+```sh
+scripts/testflight.sh 2
+```
+
+The argument is the build number; raise it for each upload. EAS Build cannot build an Exact app, so the script builds the signed `.ipa` here and `eas submit` uploads it. The App Store Connect app is 6832787049, named "Rooftop Rumble (6c5aef)" there because "Rooftop Rumble" was taken. Apple processes the build after the upload. Check it with `eas submit:status -p ios --profile production --json --non-interactive` in `release/`: `processingState` is `VALID` when it is ready.

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Rooftop Rumble",
     "slug": "exact-beat-em-up",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "ios": {
       "bundleIdentifier": "com.schroedernathan.exactbeatemup",
       "infoPlist": {
