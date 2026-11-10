@@ -58,6 +58,34 @@ fn every_checkpoint_is_a_place_to_stand() {
     }
 }
 
+// A runner who leaves the roofs comes back to the last checkpoint it reached, on
+// its feet, and the race goes on.
+#[test]
+fn a_runner_who_falls_starts_again_at_the_last_checkpoint() {
+    for id in 0..race::COUNT {
+        let level = race::level(id);
+        let mut game = bot::start(id);
+        let second = level.checkpoints[1];
+        game.post(format!("checkpoint 1"));
+        game.run(300.0);
+        // Reaching it by any way counts.
+        assert_eq!(bot::race(&game).checkpoint, 1, "{}", level.title);
+        // Far out over the street, level with the roofs.
+        game.post(format!("goto {} {} {} 0", second.at[0] + 300.0, second.at[1], second.at[2]));
+        let back = (0..1200).any(|_| {
+            game.run(bot::TICK_MS);
+            bot::race(&game).falls == 1
+        });
+        assert!(back, "{}: the runner fell to {} and stayed", level.title, bot::feet(&game));
+        game.run(600.0);
+        let at = bot::feet(&game);
+        let home = Vec3::from_array(second.at);
+        assert!((at - home).length() < 0.3, "{}: back at {at}, not {home}", level.title);
+        assert_eq!(bot::doing(&game), "ground", "{}", level.title);
+        assert!(!bot::race(&game).finished);
+    }
+}
+
 // Write one level as JSON for `tools/map.py`: `LEVEL=0 OUT=/tmp/level.json`.
 #[test]
 #[ignore]

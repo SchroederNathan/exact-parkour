@@ -103,7 +103,7 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 98 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 99 hostless tests and the determinism lints.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
@@ -112,7 +112,7 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
 - `logic/tests/run_skyline.rs`, `run_switchback.rs`, `run_helix.rs`: a scripted runner plays each race from the start to the finish with no fall. It pushes the stick and presses Jump and Slide, as a player does. Each level also finishes with every press early and late.
 - `logic/tests/envelope.rs`: the gaps the runner crosses, a slide gate that stops a run and passes a slide, and a course with every piece of the kit. The ignored `envelope` test prints the table of jumps.
-- `logic/tests/race.rs`: each checkpoint and each finish is a place to stand.
+- `logic/tests/race.rs`: each checkpoint and each finish is a place to stand, and a runner who falls starts again at the last checkpoint.
 
 To see one move tick by tick, run the ignored `trace` test. It prints where the hips, shoulders and holds are and which bone, if any, is in the wall:
 
