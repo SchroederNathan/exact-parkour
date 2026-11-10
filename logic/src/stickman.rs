@@ -1082,8 +1082,8 @@ pub fn model(rig: &Rig) -> Model {
 /// One state per `Act`, and from each an edge to every other on the number `act`.
 /// `move` blends the stance and the gaits along `pace` (m/s); `air` blends falling
 /// into rising along `lift` (vertical m/s). Every other state holds its clip still
-/// and the game sets its phase, so the pose follows the move's own progress. Each
-/// change fades from the pose the body was in.
+/// and the game sets its phase, so the pose follows the move's own progress. No
+/// state fades in: `flow` carries the pose of one move into the next.
 pub fn animator() -> Animator {
     let mut knots = vec![(0.0, "stand".to_string())];
     knots.extend(PACES.iter().map(|p| (p.speed, p.clip())));
@@ -1095,14 +1095,14 @@ pub fn animator() -> Animator {
     let states = Act::ALL.map(|act| {
         let name = act.state();
         let state = match act {
-            Act::Move => State::blend(name, locomotion.clone()).fade(0.14),
-            Act::Air => State::blend(name, Blend::across(AIR).parameter("lift")).fade(0.1),
-            Act::Vault => State::clip(name, "vault").speed(0.0).fade(0.08),
-            Act::Hang => State::clip(name, "hang").speed(0.0).fade(0.12),
-            Act::Climb => State::clip(name, "climb").speed(0.0).fade(0.1),
-            Act::Roll => State::clip(name, "roll").speed(0.0).fade(0.1),
-            Act::Land => State::clip(name, "crouch").speed(0.0).fade(0.05),
-            Act::Slide => State::clip(name, "slide").speed(0.0).fade(0.12),
+            Act::Move => State::blend(name, locomotion.clone()),
+            Act::Air => State::blend(name, Blend::across(AIR).parameter("lift")),
+            Act::Vault => State::clip(name, "vault").speed(0.0),
+            Act::Hang => State::clip(name, "hang").speed(0.0),
+            Act::Climb => State::clip(name, "climb").speed(0.0),
+            Act::Roll => State::clip(name, "roll").speed(0.0),
+            Act::Land => State::clip(name, "crouch").speed(0.0),
+            Act::Slide => State::clip(name, "slide").speed(0.0),
             Act::Rise => State::blend(
                 name,
                 Blend::across([(0.0, "rise-prone"), (1.0, "rise-supine")]).parameter("supine"),

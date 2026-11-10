@@ -3,6 +3,7 @@
 //!
 //! `Action` is the whole story of the body at one tick. Each variant owns the data
 //! of its move, and `step` is the only place one becomes another.
+use crate::flow::{self, Flow};
 use crate::gait::{RUN, SPRINT};
 use crate::hold::{self, Hold, Limb};
 use crate::ledge::{self, Ledge};
@@ -1516,11 +1517,26 @@ fn lifted(w: &World, need: &dyn Fn(Vec3, f32) -> f32) -> Vec<Hold> {
         .collect()
 }
 
-/// Lay the ragdoll's pose over the Animator's, or put the hands and feet on what
-/// they hold. Call after `animation::step`.
-pub fn present(w: &mut World) {
+// How fast the pose of the move before dies away in each move, per second. A
+// move that must have a hand or a foot somewhere at once takes over sooner.
+fn takes_over(act: Act) -> f32 {
+    match act {
+        Act::Move => 18.0,
+        Act::Air => 13.0,
+        Act::Hang | Act::Climb => 14.0,
+        Act::Slide => 16.0,
+        Act::Vault | Act::Roll => 22.0,
+        Act::Land | Act::Rise => 24.0,
+    }
+}
+
+/// Lay the ragdoll's pose over the Animator's, or carry the last move's pose into
+/// this one and put the hands and feet on what they hold. Call after
+/// `animation::step`.
+pub fn present(w: &mut World, motion: Motion) {
     let body = w.require::<Parkour>("player").clone();
     let (action, yaw) = (body.action.clone(), body.yaw);
+    let act = motion.act;
     let weight = match action {
         Action::Ragdoll => 1.0,
         // The limbs gather from where they lay into the first of the rise.
@@ -1533,6 +1549,8 @@ pub fn present(w: &mut World) {
                 Action::Air if body.leap > 0.0 => lunge(w, &body),
                 _ => {}
             }
+            let was = w.get::<Flow>("stickman").map_or(act.code(), |flow| flow.act);
+            flow::carry(w, act.code(), (was != act.code()).then(|| takes_over(act)));
             let holds = holds(w);
             hold::apply(w, &holds);
             // The feet go over a wall the body vaults, and stay out of the ground
@@ -1554,6 +1572,7 @@ pub fn present(w: &mut World) {
             return;
         }
     };
+    flow::settle(w, act.code());
     let doll = w.require::<Ragdoll>("player").clone();
     if !doll.active() {
         return;

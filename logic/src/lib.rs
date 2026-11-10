@@ -5,6 +5,7 @@ pub mod arena;
 pub mod body;
 pub mod camera;
 pub mod debug;
+pub mod flow;
 pub mod gait;
 pub mod hold;
 pub mod ledge;
@@ -209,6 +210,7 @@ impl Game for ExactBeatEmUp {
                 stickman::animator(),
                 stickman::layers(),
                 Stride::default(),
+                flow::Flow::default(),
             ),
         );
         camera::setup(w);
@@ -243,7 +245,7 @@ impl Game for ExactBeatEmUp {
         physics::step(w);
         locomotion::drive(w, "stickman", motion);
         animation::step(w);
-        body::present(w);
+        body::present(w, motion);
         camera::present(w, motion);
         if args.mode == RACE_MODE {
             race::tick(w);
