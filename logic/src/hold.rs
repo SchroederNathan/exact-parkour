@@ -155,6 +155,22 @@ pub fn turn(w: &mut World, name: &str, by: Quat) {
     pose.local[slot..slot + 4].copy_from_slice(&turned.to_array());
 }
 
+/// Move the joint `name` of the drawn body by `by`, in its parent's frame.
+pub fn shift(w: &mut World, name: &str, by: Vec3) {
+    let slot = {
+        let model = w.model(MODEL).expect("the stick man's model is generated in setup");
+        node(model, name) as usize * 10
+    };
+    let Some(mut pose) = w.get_mut::<Pose>("stickman") else {
+        return;
+    };
+    if pose.local.len() < slot + 3 {
+        return;
+    }
+    let moved = Vec3::from_slice(&pose.local[slot..slot + 3]) + by;
+    pose.local[slot..slot + 3].copy_from_slice(&moved.to_array());
+}
+
 // The limb's three joints as they are posed, in the body's frame.
 fn joints(model: &Model, local: &[f32], limb: Limb) -> [Vec3; 3] {
     limb.chain()

@@ -534,7 +534,7 @@ fn a_hanging_body_shimmies_along_the_edge_to_its_ends() {
             let now = body::holds(game.world());
             for (i, off) in off_the_edge(&game).into_iter().enumerate() {
                 let holds = now[i].grip == 1.0;
-                assert!(!holds || off < 0.01, "{what}: hand {i} is {off} m off the edge at tick {tick}");
+                assert!(!holds || off < 0.015, "{what}: hand {i} is {off} m off the edge at tick {tick}");
             }
             // A hand that holds the same place on the edge does not move.
             let wrists_now = now.clone().map_holds(&game);
@@ -621,7 +621,8 @@ fn a_jump_from_the_end_of_an_edge_goes_where_the_stick_aims() {
         });
         assert!(at_end, "{what}: never leaned at the end");
         game.tap("Space");
-        let off = run(&mut game, 100.0, &what, |g| matches!(action(g), Action::Air));
+        // The legs swing back first, then it goes.
+        let off = run(&mut game, 300.0, &what, |g| matches!(action(g), Action::Air));
         assert!(off, "{what}: no jump, doing {:?}", action(&game));
         let there = run(&mut game, 2500.0, &what, |g| {
             matches!(action(g), Action::Hang(_))

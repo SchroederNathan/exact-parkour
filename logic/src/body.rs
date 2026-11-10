@@ -96,9 +96,11 @@ const SLIDE_TURN: f32 = 1.5;
 const LEAP_ALONG: f32 = 4.0;
 const LEAP_UP: f32 = 4.2;
 const LEAP: f32 = 0.9;
+/// Seconds a hanging body swings its legs back before it leaps.
+const WIND_UP: f32 = 0.12;
 /// How far a body that peeks past the end of an edge swings out, metres, and how
 /// fast it leans there and back, per second.
-const PEEK: f32 = 0.18;
+const PEEK: f32 = 0.22;
 const PEEK_RATE: f32 = 4.0;
 
 /// A thing that hits the body with at least this much momentum, in kg·m/s, knocks
@@ -153,6 +155,14 @@ pub struct Hang {
     /// How far the body leans out past the end of the edge to look along the
     /// wall, -1 to 1; to the left is positive.
     pub lean: f32,
+    /// How fast the body met the wall and how fast it was going along it when
+    /// the hands caught the edge, m/s: what its legs swing with.
+    pub pace: f32,
+    pub swung: f32,
+    /// A leap along the wall that is winding up: the seconds until it goes, and
+    /// the way it will go, +1 to the left.
+    pub wind: f32,
+    pub aim: f32,
     /// Whether the stick has stopped pushing at the wall since the catch. Until
     /// then it still holds the push of the run-up, which is not a wish to climb.
     pub live: bool,
@@ -313,6 +323,10 @@ pub struct Parkour {
     pub glide: bool,
     /// Seconds the legs are still slow after a landing they barely took.
     pub stagger: f32,
+    /// In the air: an edge the hands could catch soon, and how far the arms have
+    /// gone up to it, 0 to 1.
+    pub ahead: Ledge,
+    pub reach: f32,
 }
 
 /// Feet position of a capsule centre.
@@ -549,6 +563,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
     };
 
     if moved.grounded {
+        body.reach = 0.0;
         let impact = if was_grounded { 0.0 } else { body.fall };
         body.airtime = 0.0;
         body.fall = 0.0;
@@ -595,18 +610,37 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         .map(|v| v.normalize_or_zero())
         .into_iter()
         .filter(|v| *v != Vec3::ZERO);
+    // The arms go up for an edge before the hands are on it.
+    let coming = looks.clone().find_map(|dir| {
+        ledge::probe(w, centre, dir, 1.0, GRAB_LOW - 0.3, GRAB_HIGH + 0.6)
+            .filter(|l| toward(l.inward()))
+    });
+    let change = dt / 0.15;
+    match coming {
+        Some(ledge) => {
+            body.ahead = ledge;
+            body.reach = (body.reach + change).min(1.0);
+        }
+        None => body.reach = (body.reach - change).max(0.0),
+    }
     for dir in looks {
         if velocity.y < 2.0 {
             let grab = ledge::probe(w, centre, dir, 0.45, GRAB_LOW, GRAB_HIGH)
                 .filter(|l| toward(l.inward()) && ledge::clear(w, l.hang()));
             if let Some(ledge) = grab {
+                // Under both hands, not only under the body: near the end of a
+                // wall the body hangs a little further along it.
+                let ledge = seated(w, ledge);
                 release(w);
                 body.fall = 0.0;
+                body.reach = 0.0;
                 let yaw = yaw_of(ledge.inward(), dir);
                 let hanging = Hang {
                     ledge,
                     caught: centre,
                     live: controls.wish.dot(ledge.inward()) < 0.3,
+                    pace: velocity.dot(ledge.inward()).max(0.0),
+                    swung: velocity.dot(ledge.left()),
                     ..Hang::default()
                 };
                 return (Action::Hang(hanging), Motion::default(), Some(yaw));
@@ -626,6 +660,21 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         }
     }
     (Action::Air, motion, facing)
+}
+
+// The place nearest `ledge` on its edge where both hands of a hanging body have
+// the edge under them and the body has room.
+fn seated(w: &World, ledge: Ledge) -> Ledge {
+    let hands = HANDS + 0.03;
+    [0.0, 0.05, -0.05, 0.1, -0.1, 0.15, -0.15, 0.2, -0.2, 0.25, -0.25, 0.3, -0.3]
+        .into_iter()
+        .filter_map(|aside| ledge::along(w, &ledge, aside))
+        .find(|at| {
+            ledge::along(w, at, hands).is_some()
+                && ledge::along(w, at, -hands).is_some()
+                && ledge::clear(w, at.hang())
+        })
+        .unwrap_or(ledge)
 }
 
 // The move a jump at the wall ahead becomes, if there is such a wall.
@@ -699,7 +748,8 @@ fn climb(centre: Vec3, ledge: &Ledge, hug: f32, travel: f32) -> Path {
         to,
         time: 0.0,
         span: 0.45 + 0.3 * height.clamp(0.0, 2.1),
-        exit: Vec3::ZERO,
+        // It comes off the climb already walking in.
+        exit: ledge.inward() * 1.2,
         height,
         ledge: *ledge,
         hug,
@@ -772,9 +822,18 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
     let away = wish.dot(ledge.out) > SECTOR;
     let centre = w.require::<Transform>("player").position;
     // A jump goes where the stick aims. Along the wall it is a leap for the next
-    // edge on it, and the body leaves from where it had leaned to.
-    if jump && side.abs() > 0.5 {
-        let along = ledge.left() * side.signum();
+    // edge on it: the legs swing back first, and then the body leaves from where
+    // it had leaned to.
+    if jump && side.abs() > 0.5 && hanging.wind == 0.0 {
+        body.buffer = 0.0;
+        hanging.wind = WIND_UP;
+        hanging.aim = side.signum();
+    }
+    if hanging.wind > 0.0 {
+        hanging.wind -= dt;
+    }
+    if hanging.aim != 0.0 && hanging.wind <= 0.0 {
+        let along = ledge.left() * hanging.aim;
         let from = centre + ledge.left() * (PEEK * hanging.lean);
         if ledge::clear(w, from) {
             w.require_mut::<Transform>("player").position = from;
@@ -789,14 +848,16 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
         return (Action::Air, Motion::default(), face);
     }
     // Away from the wall it is a jump off it, backward.
-    if jump && away {
+    if jump && away && hanging.aim == 0.0 {
         body.buffer = 0.0;
         body.regrab = REGRAB;
         body.airtime = COYOTE;
         w.require_mut::<CapsuleController>("player").velocity = ledge.out * 3.5 + Vec3::Y * 3.8;
         return (Action::Air, Motion::default(), Some(yaw_of(ledge.out, ledge.out)));
     }
-    let up = jump || wish.dot(ledge.inward()) > SECTOR;
+    let winding = hanging.aim != 0.0;
+    let up = !winding && (jump || wish.dot(ledge.inward()) > SECTOR);
+    let away = away && !winding;
     if up && ledge.standable {
         body.buffer = 0.0;
         let mut path = climb(centre, &ledge, HUG * hanging.settled(), hanging.travel);
@@ -812,7 +873,7 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
     }
     // Along the edge, hand over hand, as far as the edge goes on under the hand
     // that leads and the body has room under it.
-    let pushing = side.abs() > 0.3 && hanging.time >= SETTLE;
+    let pushing = side.abs() > 0.3 && hanging.time >= SETTLE && !winding;
     let want = if pushing { side.signum() * SHIMMY } else { 0.0 };
     let change = SHIMMY_ACCEL * dt;
     hanging.speed += (want - hanging.speed).clamp(-change, change);
@@ -880,7 +941,7 @@ fn grips(ledge: &Ledge, travel: f32, lean: f32) -> [Hold; 2] {
         // The first half of a cycle carries the hand; the second leaves it planted.
         let swing = ((cycle - whole) * 2.0).min(1.0);
         let along = side * HANDS + HAND_STEP * (whole + smooth(swing)) - travel;
-        let lift = 0.03 * math::sin(std::f32::consts::PI * swing);
+        let lift = 0.04 * math::sin(std::f32::consts::PI * swing);
         let lets_go = (-side * lean).max(0.0);
         Hold::new(limb, over + ledge.left() * along + Vec3::Y * lift)
             .grip(1.0 - smooth(lets_go / 0.6))
@@ -896,7 +957,23 @@ fn grips(ledge: &Ledge, travel: f32, lean: f32) -> [Hold; 2] {
 pub fn holds(w: &World) -> Vec<Hold> {
     let centre = w.require::<Transform>("player").position;
     match &w.require::<Parkour>("player").action {
-        Action::Hang(hanging) => grips(&hanging.ledge, hanging.travel, hanging.lean).to_vec(),
+        // The hands close on the edge over the first moment of the catch.
+        Action::Hang(hanging) => grips(&hanging.ledge, hanging.travel, hanging.lean)
+            .map(|hand| hand.grip(hand.grip * smooth(hanging.time / 0.08)))
+            .to_vec(),
+        // In the air, with an edge coming: each arm goes up toward where its hand
+        // will be, as far as it reaches.
+        Action::Air if w.require::<Parkour>("player").reach > 0.0 => {
+            let body = w.require::<Parkour>("player");
+            grips(&body.ahead, 0.0, 0.0)
+                .map(|hand| {
+                    let shoulder = hold::joint(w, hand.limb.chain()[0]);
+                    let to = hand.at - shoulder;
+                    let at = shoulder + to.normalize_or_zero() * to.length().min(0.5);
+                    Hold::new(hand.limb, at).grip(smooth(body.reach))
+                })
+                .to_vec()
+        }
         // A slide rides on the tucked foot and the hand behind, and the other
         // heel skims the ground ahead. Each is on the ground where it is, so a
         // slide down a slope or over a step still touches it.
@@ -938,6 +1015,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
             let ledge = &path.ledge;
             // How far the feet's level is above the edge; under it is negative.
             let level = centre.y - HALF - ledge.edge.y;
+            let unfacing = Quat::from_rotation_y(-w.require::<Parkour>("player").yaw);
             // Where the feet will stand at the end of the climb.
             let stand = path.to - Vec3::Y * (HALF + 0.01);
             // A foot comes up outside the wall's face to over its top, knee out to
@@ -951,12 +1029,31 @@ pub fn holds(w: &World) -> Vec<Hold> {
                 let lifted = ledge.edge + ledge.out * clear + beside + Vec3::Y * 0.2;
                 let down = stand + beside - ledge.inward() * 0.03 + Vec3::Y * hold::ANKLE;
                 let carry = smooth((gate - 0.5) / 0.5);
-                let knee = Vec3::new(side * 0.8, 0.3, 0.2).lerp(Vec3::new(side * 0.1, 0.3, 0.8), carry);
+                // The knee goes out along the wall, wherever the body faces, and
+                // comes to the front as the foot goes in.
+                let out = unfacing * (ledge.left() * (side * 0.8) + ledge.out * 0.1 + Vec3::Y * 0.3);
+                let knee = out.lerp(Vec3::new(side * 0.1, 0.3, 0.8), carry);
                 Hold::new(limb, lifted.lerp(down, carry))
                     .grip(smooth(gate / 0.5))
                     .bend(knee)
             };
-            let mut holds = grips(ledge, path.travel, path.leaning()).to_vec();
+            // The hands press on the edge with the elbows coming up over them,
+            // move in onto the top as the chest comes over, and let go when the
+            // feet have the weight.
+            let u = path.progress();
+            let onto = ledge.inward() * (0.1 * smooth((u - 0.3) / 0.2));
+            let press = smooth((u - 0.25) / 0.2);
+            let mut holds: Vec<Hold> = grips(ledge, path.travel, path.leaning())
+                .into_iter()
+                .map(|hand| {
+                    let side = if hand.limb == Limb::HandL { 1.0 } else { -1.0 };
+                    let elbow = Vec3::new(side * 0.35, 0.0, -0.5)
+                        .lerp(Vec3::new(side * 0.3, 0.3, -0.25), press);
+                    Hold::new(hand.limb, hand.at + onto)
+                        .grip(hand.grip * (1.0 - smooth((u - 0.6) / 0.15)))
+                        .bend(elbow)
+                })
+                .collect();
             // One foot goes onto the top as the hips reach it, and the body stands
             // up over that foot. The other follows when the body is over the top,
             // and so comes up closer to the face.
@@ -1265,27 +1362,64 @@ fn rise(w: &mut World, time: f32, from: Vec3, to: Vec3, supine: bool) -> Outcome
     (Action::Ground, motion, None)
 }
 
-// What hangs from the hands moves: the legs swing from the catch and settle, trail
-// behind a shimmy, and go the other way when the body leans out to look, the head
-// turns to where it looks, and the arm that let go spreads for balance.
+// What hangs from the hands moves. The whole body swings from the catch, harder
+// the faster it came, and the knees fold as the feet come to the wall. In a
+// shimmy the hips roll from hand to hand and the legs follow, one after the
+// other. Before a leap the legs swing back. At the end of an edge the body
+// rolls about the shoulder of the hand it hangs from, so the head goes out past
+// the end and the legs go the other way; the head turns to look, and the arm
+// that let go hangs out for balance.
 fn sway(w: &mut World, hanging: &Hang) {
-    let swing = 0.3 * math::exp(-3.0 * hanging.time) * math::cos(8.0 * hanging.time);
-    let aside = -0.22 * hanging.speed / SHIMMY - 0.22 * hanging.lean;
-    let legs = Quat::from_rotation_z(aside) * Quat::from_rotation_x(swing);
-    hold::turn(w, "thigh_l", legs);
-    hold::turn(w, "thigh_r", legs);
-    hold::turn(w, "shin_l", Quat::from_rotation_x(-0.6 * swing.min(0.0)));
-    hold::turn(w, "shin_r", Quat::from_rotation_x(-0.6 * swing.min(0.0)));
-    if hanging.lean != 0.0 {
-        let lean = hanging.lean;
+    let t = hanging.time;
+    let swing = (0.2 + 0.07 * hanging.pace).min(0.55) * math::exp(-2.2 * t) * math::cos(7.0 * t)
+        + 0.03 * math::sin(3.1 * t);
+    let fold = swing.min(0.0);
+    let k = hanging.speed / SHIMMY;
+    let step = std::f32::consts::TAU * hanging.travel / HAND_STEP;
+    let wind = if hanging.aim != 0.0 {
+        hanging.aim * smooth(1.0 - hanging.wind.max(0.0) / WIND_UP)
+    } else {
+        0.0
+    };
+    let along = 0.11 * hanging.swung * math::exp(-2.5 * t) * math::sin(6.0 * t);
+    let aside = -0.2 * k - 0.4 * wind + along;
+    let lean = hanging.lean;
+    let roll = 0.4 * lean * (1.0 + 0.06 * math::sin(1.8 * t)) + 0.05 * k * math::sin(step);
+    if roll != 0.0 {
+        // About the shoulder of the hand on that side, which stays where it is.
+        let shoulder = Vec3::new(0.19 * roll.signum(), 0.48, 0.0);
+        let turn = Quat::from_rotation_z(-roll);
+        hold::shift(w, "hips", shoulder - turn * shoulder);
+        hold::turn(w, "hips", turn);
+    }
+    hold::turn(w, "hips", Quat::from_rotation_x(0.35 * swing));
+    for (leg, late, share) in [("l", 0.0, 0.6), ("r", 1.2, 1.2)] {
+        let own = aside * share + 0.08 * k * math::sin(step - late);
+        let thigh = Quat::from_rotation_z(own)
+            * Quat::from_rotation_x(swing.max(0.0) + 1.3 * fold);
+        hold::turn(w, &format!("thigh_{leg}"), thigh);
+        let knee = -2.4 * fold + 0.25 * k.abs() * share + 0.4 * wind.abs();
+        hold::turn(w, &format!("shin_{leg}"), Quat::from_rotation_x(knee));
+    }
+    if lean != 0.0 {
         hold::turn(
             w,
             "neck",
-            Quat::from_rotation_z(-0.25 * lean) * Quat::from_rotation_y(0.7 * lean),
+            Quat::from_rotation_z(-0.2 * lean) * Quat::from_rotation_y(0.7 * lean),
         );
-        let free = if lean > 0.0 { "upper_arm_r" } else { "upper_arm_l" };
-        hold::turn(w, free, Quat::from_rotation_z(1.2 * lean));
+        let side = if lean > 0.0 { "r" } else { "l" };
+        hold::turn(w, &format!("upper_arm_{side}"), Quat::from_rotation_z(1.9 * lean));
+        hold::turn(w, &format!("forearm_{side}"), Quat::from_rotation_x(-0.5 * lean.abs()));
     }
+}
+
+// A body that has leapt along a wall leans the way it goes, and its legs trail.
+fn lunge(w: &mut World, body: &Parkour) {
+    let along = w.require::<CapsuleController>("player").velocity.dot(Vec3::Y.cross(body.wall));
+    let lean = (along / LEAP_ALONG).clamp(-1.0, 1.0) * smooth(body.leap / 0.3);
+    hold::turn(w, "hips", Quat::from_rotation_z(-0.3 * lean));
+    hold::turn(w, "thigh_l", Quat::from_rotation_z(-0.35 * lean));
+    hold::turn(w, "thigh_r", Quat::from_rotation_z(-0.15 * lean));
 }
 
 /// How high a point of a vaulting body must be to pass the wall: over the top by
@@ -1320,10 +1454,8 @@ fn lifted(w: &World, need: &dyn Fn(Vec3, f32) -> f32) -> Vec<Hold> {
 /// Lay the ragdoll's pose over the Animator's, or put the hands and feet on what
 /// they hold. Call after `animation::step`.
 pub fn present(w: &mut World) {
-    let (action, yaw) = {
-        let body = w.require::<Parkour>("player");
-        (body.action.clone(), body.yaw)
-    };
+    let body = w.require::<Parkour>("player").clone();
+    let (action, yaw) = (body.action.clone(), body.yaw);
     let weight = match action {
         Action::Ragdoll => 1.0,
         // The limbs gather from where they lay into the first of the rise.
@@ -1331,8 +1463,10 @@ pub fn present(w: &mut World) {
         _ => {
             // The trunk and the free limbs first, then the holds, which reach
             // from wherever that left the shoulders and hips.
-            if let Action::Hang(hanging) = &action {
-                sway(w, hanging);
+            match &action {
+                Action::Hang(hanging) => sway(w, hanging),
+                Action::Air if body.leap > 0.0 => lunge(w, &body),
+                _ => {}
             }
             let holds = holds(w);
             hold::apply(w, &holds);
