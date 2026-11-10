@@ -327,12 +327,15 @@ pub(crate) fn through(times: &[f32], values: &[f32], t: f32) -> f32 {
 // A clip `seconds` long through `keys`. The Animator holds it still and the game
 // sets its phase, so a move's pose follows the move and not the clock. A joint
 // absent from a key is at rest there. Between keys every angle follows a smooth
-// curve, sampled `SAMPLES` times.
+// curve, sampled once a tick.
 pub(crate) fn keyed(rig: &Rig, name: &str, seconds: f32, keys: &[Key]) -> Clip {
-    const SAMPLES: usize = 48;
+    // One sample for each tick of the clip's length. The engine goes straight
+    // from sample to sample, and with fewer a fast joint changes its speed at
+    // each one, which shows as a shake.
+    let samples = math::ceil(seconds * crate::ExactBeatEmUp::HZ as f32) as usize;
     let at: Vec<f32> = keys.iter().map(|k| k.at).collect();
-    let times: Vec<f32> = (0..=SAMPLES)
-        .map(|i| seconds * i as f32 / SAMPLES as f32)
+    let times: Vec<f32> = (0..=samples)
+        .map(|i| seconds * i as f32 / samples as f32)
         .collect();
     let mut bones: Vec<&str> = keys
         .iter()
@@ -438,10 +441,10 @@ fn climb(rig: &Rig) -> Clip {
                     ("upper_arm_r", [-0.9, 0.0, -0.45]),
                     ("forearm_l", [-1.6, 0.0, 0.0]),
                     ("forearm_r", [-1.6, 0.0, 0.0]),
-                    ("thigh_l", [-0.3, 0.0, 0.0]),
-                    ("shin_l", [0.65, 0.0, 0.0]),
-                    ("thigh_r", [-0.75, 0.0, -0.35]),
-                    ("shin_r", [1.3, 0.0, 0.0]),
+                    ("thigh_l", [-0.1, 0.0, 0.0]),
+                    ("shin_l", [0.5, 0.0, 0.0]),
+                    ("thigh_r", [-0.8, -0.9, 0.0]),
+                    ("shin_r", [1.4, 0.0, 0.0]),
                     ("foot_l", [0.35, 0.0, 0.0]),
                     ("hips", [0.32, 0.0, 0.0]),
                     ("spine", [0.45, 0.0, 0.0]),
@@ -458,10 +461,10 @@ fn climb(rig: &Rig) -> Clip {
                     ("upper_arm_r", [0.3, 0.0, -0.25]),
                     ("forearm_l", [-0.4, 0.0, 0.0]),
                     ("forearm_r", [-0.4, 0.0, 0.0]),
-                    ("thigh_l", [-0.4, 0.0, 0.0]),
-                    ("shin_l", [0.8, 0.0, 0.0]),
+                    ("thigh_l", [0.1, 0.0, 0.0]),
+                    ("shin_l", [0.5, 0.0, 0.0]),
                     ("foot_l", [0.4, 0.0, 0.0]),
-                    ("thigh_r", [-1.35, 0.0, -0.4]),
+                    ("thigh_r", [-1.35, -1.1, 0.0]),
                     ("shin_r", [1.8, 0.0, 0.0]),
                     ("hips", [0.4, 0.0, 0.0]),
                     ("spine", [0.5, 0.0, 0.0]),
@@ -478,14 +481,32 @@ fn climb(rig: &Rig) -> Clip {
                     ("upper_arm_r", [-0.5, 0.0, -0.2]),
                     ("forearm_l", [-0.7, 0.0, 0.0]),
                     ("forearm_r", [-0.7, 0.0, 0.0]),
-                    ("thigh_l", [-0.3, 0.0, 0.0]),
-                    ("shin_l", [1.0, 0.0, 0.0]),
+                    ("thigh_l", [0.35, 0.0, 0.0]),
+                    ("shin_l", [0.5, 0.0, 0.0]),
                     ("foot_l", [0.3, 0.0, 0.0]),
-                    ("thigh_r", [-1.6, 0.0, -0.15]),
+                    ("thigh_r", [-1.6, -0.5, 0.0]),
                     ("shin_r", [1.9, 0.0, 0.0]),
                     ("hips", [0.3, 0.0, 0.0]),
                     ("spine", [0.5, 0.0, 0.0]),
                     ("neck", [-0.5, 0.0, 0.0]),
+                ],
+            },
+            // The second knee comes up at its own side, clear of the edge.
+            Key {
+                at: 0.8 / SPAN,
+                drop: 0.2,
+                joints: &[
+                    ("upper_arm_l", [-0.45, 0.0, 0.16]),
+                    ("upper_arm_r", [-0.45, 0.0, -0.16]),
+                    ("forearm_l", [-0.65, 0.0, 0.0]),
+                    ("forearm_r", [-0.65, 0.0, 0.0]),
+                    ("thigh_l", [-0.3, 0.6, 0.0]),
+                    ("shin_l", [1.3, 0.0, 0.0]),
+                    ("thigh_r", [-1.45, -0.2, 0.0]),
+                    ("shin_r", [1.8, 0.0, 0.0]),
+                    ("hips", [0.22, 0.0, 0.0]),
+                    ("spine", [0.45, 0.0, 0.0]),
+                    ("neck", [-0.4, 0.0, 0.0]),
                 ],
             },
             // Crouched on the top over both feet, the hands just off it.
@@ -497,7 +518,7 @@ fn climb(rig: &Rig) -> Clip {
                     ("upper_arm_r", [-0.35, 0.0, -0.12]),
                     ("forearm_l", [-0.6, 0.0, 0.0]),
                     ("forearm_r", [-0.6, 0.0, 0.0]),
-                    ("thigh_l", [-1.0, 0.0, 0.0]),
+                    ("thigh_l", [-1.0, 0.4, 0.0]),
                     ("shin_l", [1.5, 0.0, 0.0]),
                     ("thigh_r", [-1.2, 0.0, 0.0]),
                     ("shin_r", [1.6, 0.0, 0.0]),

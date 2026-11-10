@@ -1190,3 +1190,84 @@ fn no_hand_or_foot_snaps_between_ticks() {
     report("gap-4 to gap-5", worst);
     all_pass(failures, 16);
 }
+
+// The hardest shake of a joint while the body is on a wall, over `ticks` ticks.
+// A joint shakes when the change of its speed turns round from one tick to the
+// next: the smaller of the two changes is how hard, in metres. `press` is called
+// before each tick with its number.
+fn worst_shake(game: &mut Game, ticks: usize, mut press: impl FnMut(&mut Game, usize)) -> (f32, &'static str, usize) {
+    const JOINTS: [&str; 12] = [
+        "hips", "head", "forearm_l", "forearm_r", "hand_l", "hand_r",
+        "shin_l", "shin_r", "foot_l", "foot_r", "upper_arm_l", "upper_arm_r",
+    ];
+    let at = |game: &Game| JOINTS.map(|name| hold::joint(game.world(), name));
+    let mut places = vec![at(game)];
+    let mut on_wall = vec![false];
+    for tick in 0..ticks {
+        press(game, tick);
+        game.run(TICK_MS);
+        places.push(at(game));
+        on_wall.push(matches!(action(game), Action::Hang(_) | Action::Climb(_)));
+    }
+    let mut worst = (0.0f32, "", 0);
+    for (i, name) in JOINTS.into_iter().enumerate() {
+        let change = |t: usize| places[t + 1][i] - places[t][i] * 2.0 + places[t - 1][i];
+        for t in 1..places.len() - 2 {
+            let (a, b) = (change(t), change(t + 1));
+            let shake = a.length().min(b.length());
+            if on_wall[t] && on_wall[t + 1] && a.dot(b) < 0.0 && shake > worst.0 {
+                worst = (shake, name, t);
+            }
+        }
+    }
+    worst
+}
+
+#[test]
+fn nothing_shakes_on_a_wall() {
+    // A knee that swings out to its side at the start of a step changes its
+    // speed by 0.06 m in a tick, once. A leg that a wall pushed out and let go
+    // by turns did so by 0.1 to 0.35 m, tick after tick.
+    const MOST: f32 = 0.075;
+    let mut failures = vec![];
+    let mut cases = 0;
+    let mut report = |what: String, worst: (f32, &'static str, usize)| {
+        println!("{what}: {} shook {:.3} m at tick {}", worst.1, worst.0, worst.2);
+        if worst.0 > MOST {
+            failures.push(format!("{what}: {} shook {} m at tick {}", worst.1, worst.0, worst.2));
+        }
+    };
+    for (name, near, sprint) in [
+        ("mantle", 0.5, false),
+        ("ledge-low", 0.35, false),
+        ("ledge-mid", 0.35, false),
+        ("ledge-high", 0.35, true),
+        ("ledge-turned", 0.35, false),
+    ] {
+        for slant in [-35.0, 0.0, 20.0] {
+            cases += 1;
+            let mut game = start();
+            approach(&mut game, park::named(name), slant, 3.0, near, sprint);
+            let worst = worst_shake(&mut game, 280, |game, tick| {
+                if tick == 110 {
+                    steer(game, Vec3::ZERO);
+                    game.tap("Space");
+                }
+            });
+            report(format!("{name} at {slant} degrees"), worst);
+        }
+    }
+    // The sprint across a gap onto a higher roof.
+    cases += 1;
+    let mut game = start();
+    let from = park::named("gap-4");
+    place(&mut game, Vec3::new(from.at[0], from.top(), from.at[2] - 1.0), Vec3::Z);
+    game.run(60.0);
+    steer(&mut game, Vec3::Z);
+    game.key_down("ShiftLeft");
+    run(&mut game, 3000.0, "gap", |g| feet(g).z > from.at[2] + from.size[2] / 2.0 - 0.35);
+    game.tap("Space");
+    let worst = worst_shake(&mut game, 200, |_, _| {});
+    report("gap-4 to gap-5".into(), worst);
+    all_pass(failures, cases);
+}

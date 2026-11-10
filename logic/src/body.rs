@@ -354,6 +354,10 @@ pub struct Parkour {
     pub stride: f32,
     /// How ready the legs are for the ground that is coming, 0 to 1.
     pub brace: f32,
+    /// In the air: a lower wall the body is about to meet, and how long it has
+    /// been in sight, 0 to 1. The legs get out of its way before they are on it.
+    pub low: Ledge,
+    pub near: f32,
 }
 
 /// Feet position of a capsule centre.
@@ -631,6 +635,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
     body.brace = 0.0;
     if grounded {
         body.reach = 0.0;
+        body.near = 0.0;
         let impact = if was_grounded { 0.0 } else { body.fall };
         body.airtime = 0.0;
         body.fall = 0.0;
@@ -697,6 +702,17 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         }
         None => body.reach = (body.reach - change).max(0.0),
     }
+    // A lower wall is not for the hands, but the legs must not go into it.
+    let low = looks.clone().find_map(|dir| {
+        ledge::probe(w, from, dir, 1.0, VAULT_LOW, GRAB_LOW - 0.3).filter(|l| toward(l.inward()))
+    });
+    match low {
+        Some(ledge) => {
+            body.low = ledge;
+            body.near = (body.near + change).min(1.0);
+        }
+        None => body.near = (body.near - change).max(0.0),
+    }
     for dir in looks {
         if velocity.y < 3.0 {
             let grab = ledge::probe(w, centre, dir, 0.45, GRAB_LOW, GRAB_HIGH)
@@ -739,7 +755,11 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
                 release(w);
                 body.fall = 0.0;
                 // The leg that leads the jump is the one that steps up.
-                let climb = Climb::join(centre, velocity, &ledge, body.lead);
+                let climb = Climb {
+                    reach: body.reach,
+                    ..Climb::join(centre, velocity, &ledge, body.lead)
+                };
+                body.reach = 0.0;
                 let yaw = yaw_of(ledge.inward(), dir);
                 return (Action::Climb(climb), climb.motion(), Some(yaw));
             }
@@ -979,12 +999,10 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
     let lean = if pushing && ended { side.signum() } else { 0.0 };
     let change = PEEK_RATE * dt;
     hanging.lean += (lean - hanging.lean).clamp(-change, change);
-    // What is left of how the body came dies away, and the wall stops what is
-    // left of a run at it.
+    // What is left of how the body came dies away. The wall stops what is left
+    // of a run at it: the body goes no further in.
     (hanging.off, hanging.drift) = climb::settle(hanging.off, hanging.drift, CATCH, dt);
-    let into = hanging.off.dot(ledge.inward());
-    if into > 0.0 {
-        hanging.off -= ledge.inward() * into;
+    if hanging.off.dot(ledge.inward()) > 0.0 {
         hanging.drift -= ledge.inward() * hanging.drift.dot(ledge.inward()).max(0.0);
     }
     w.require_mut::<Transform>("player").position = hanging.centre();
@@ -1048,7 +1066,9 @@ pub fn holds(w: &World) -> Vec<Hold> {
         // an arm is long: the hand is then as far toward it as the arm goes.
         Action::Hang(hanging) => grips(&hanging.ledge, hanging.travel, hanging.lean)
             .map(|hand| {
-                let closed = smooth(hanging.time / 0.08).max(smooth(hanging.reach));
+                // They close from as far as the arms had gone up to it.
+                let reached = smooth(hanging.reach);
+                let closed = reached + (1.0 - reached) * smooth(hanging.time / 0.1);
                 let shoulder = hold::joint(w, hand.limb.chain()[0]);
                 let to = hand.at - shoulder;
                 let at = if hanging.time < SWUNG_IN && to.length() > ARM {
@@ -1125,15 +1145,19 @@ pub fn holds(w: &World) -> Vec<Hold> {
                 smooth((u - from) / (full - from)) * (1.0 - smooth((u - fade) / (gone - fade)))
             };
             vec![
+                // Each of these eases in and out by its own grip.
                 Hold::new(Limb::FootR, on(tucked, -0.12, hold::ANKLE))
-                    .grip(between(0.0, 0.16, 0.9, 1.0)),
+                    .grip(between(0.0, 0.16, 0.9, 1.0))
+                    .firm(),
                 Hold::new(Limb::FootL, on(long, 0.1, 0.15))
                     .grip(between(0.12, 0.3, 0.76, 0.92))
-                    .loose(),
+                    .loose()
+                    .firm(),
                 Hold::new(Limb::HandL, on(-0.46, 0.4, hold::WRIST))
                     .grip(between(0.1, 0.3, 0.7, 0.86))
                     .slack(0.6)
-                    .bend(Vec3::new(0.5, 0.1, -0.6)),
+                    .bend(Vec3::new(0.5, 0.1, -0.6))
+                    .firm(),
             ]
         }
         // The hand starts for the wall's top well before the shoulder is over it.
@@ -1150,15 +1174,20 @@ pub fn holds(w: &World) -> Vec<Hold> {
             // own side, swings over the edge in one arc and steps in onto the
             // top, as on a high stair. It goes from `from` to `to` seconds of
             // the course, and `onto` is where on the top it steps, in metres
-            // from the edge. Before the swing the leg is where the pose has it,
-            // and the foot takes the hold as it goes.
+            // from the edge. Before the swing the leg is where the pose has it.
+            // The hold takes the foot whole when the swing starts, and the foot
+            // catches up with it from where it was.
             // `under` is how far below the edge it starts from, and `aside` how
             // far out to its side the knee goes on the way.
-            let step = |side: f32, from: f32, to: f32, onto: f32, under: f32, aside: f32| {
+            // A leg that `trails` hangs behind the body when its swing starts,
+            // as the second leg of a climb out of a hang does, and its knee
+            // comes round from there.
+            let step = |side: f32, from: f32, to: f32, onto: f32, under: f32, aside: f32, trails: bool| {
                 let q = ((t - from) / (to - from)).clamp(0.0, 1.0);
                 let beside = ledge.left() * (side * 0.09);
-                let low = ledge.edge + ledge.out * 0.24 + beside - Vec3::Y * under;
-                let over = ledge.edge + ledge.out * 0.16 + beside + Vec3::Y * 0.5;
+                // Far enough out that the toes clear the face on the way up.
+                let low = ledge.edge + ledge.out * 0.32 + beside - Vec3::Y * under;
+                let over = ledge.edge + ledge.out * 0.2 + beside + Vec3::Y * 0.5;
                 let down = top + ledge.inward() * onto + beside + Vec3::Y * hold::ANKLE;
                 let s = smooth(q);
                 let at = low * ((1.0 - s) * (1.0 - s)) + over * (2.0 * s * (1.0 - s)) + down * (s * s);
@@ -1169,7 +1198,10 @@ pub fn holds(w: &World) -> Vec<Hold> {
                     + Vec3::Y * 0.8;
                 // The toes point down while the foot comes up beside the wall,
                 // and level as it comes over the edge.
-                (at, smooth(q / 0.6), smooth((q - 0.55) / 0.3), up.lerp(inside, smooth((q - 0.4) / 0.6)))
+                let behind = unfacing * (ledge.out * 0.5 + ledge.left() * (side * 0.15)) - Vec3::Y * 0.1;
+                let up = if trails { behind.lerp(up, smooth(q / 0.45)) } else { up };
+                let grip = if q > 0.0 { 1.0 } else { 0.0 };
+                (at, grip, smooth((q - 0.55) / 0.3), up.lerp(inside, smooth((q - 0.4) / 0.6)))
             };
             // The first foot steps onto the top by the edge and takes the
             // weight. The second steps past it to where the body will stand,
@@ -1182,14 +1214,14 @@ pub fn holds(w: &World) -> Vec<Hold> {
             // The second knee must be over the top before the hips are.
             let next = (from + 0.06).max(0.68);
             let last = (next + 0.22).max(0.94).min(climb::SPAN - 0.02);
-            let (first, grip, flat, knee) = step(climb.first, from, to, behind, 0.5, 0.5);
+            let (first, grip, flat, knee) = step(climb.first, from, to, behind, 0.5, 0.5, false);
             let closes = smooth((t - last) / (climb::SPAN - last));
             let closed = first
                 + ledge.inward() * ((ahead - behind) * closes)
                 + Vec3::Y * (0.06 * math::sin(std::f32::consts::PI * closes));
             // The hips are over the top by then: the second knee comes
             // through in front, from where the leg hangs.
-            let (second, grip_2, flat_2, knee_2) = step(-climb.first, next, last, ahead, 0.2, 0.3);
+            let (second, grip_2, flat_2, knee_2) = step(-climb.first, next, last, ahead, 0.2, 0.3, joined == 0.0);
             let (one, two) = if climb.first > 0.0 {
                 (Limb::FootL, Limb::FootR)
             } else {
@@ -1206,18 +1238,32 @@ pub fn holds(w: &World) -> Vec<Hold> {
             // hips needs no hands.
             let onto = ledge.inward() * (0.1 * smooth((t - 0.34) / 0.2));
             let press = smooth((t - climb::PULLED) / 0.25);
-            let arrives = if joined > 0.0 { smooth((t - joined) / 0.14) } else { 1.0 };
+            // They go on from as far as they had gone up to the edge in the air.
+            let reached = smooth(climb.reach);
+            let arrives = if joined > 0.0 {
+                reached + (1.0 - reached) * smooth((t - joined) / 0.14)
+            } else {
+                1.0
+            };
+            // Once on the edge they ease off by their own grip. Until then a
+            // hand that was somewhere else catches up.
+            let on = joined == 0.0 || t - joined > 0.25;
             let needed = smooth((climb.height - 0.6) / 0.25);
-            let lets_go = 1.0 - smooth((t - 0.72) / 0.14);
+            let lets_go = 1.0 - smooth((t - 0.7) / 0.2);
             let mut holds: Vec<Hold> = grips(ledge, climb.travel, climb.leaning())
                 .into_iter()
                 .map(|hand| {
                     let side = if hand.limb == Limb::HandL { 1.0 } else { -1.0 };
                     let elbow = Vec3::new(side * 0.35, 0.0, -0.5)
                         .lerp(Vec3::new(side * 0.3, 0.3, -0.25), press);
-                    Hold::new(hand.limb, hand.at + onto)
+                    let hold = Hold::new(hand.limb, hand.at + onto)
                         .grip(hand.grip * arrives * needed * lets_go)
-                        .bend(elbow)
+                        .bend(elbow);
+                    if on {
+                        hold.firm()
+                    } else {
+                        hold
+                    }
                 })
                 .collect();
             holds.extend(feet);
@@ -1618,38 +1664,57 @@ fn lifted(w: &World, need: &dyn Fn(Vec3, f32) -> f32) -> Vec<Hold> {
         .collect()
 }
 
-// Swing back a thigh whose knee the pose has in the wall's face, until the knee
-// is out of it. A knee above the top is over the wall, and is left where it is.
-fn knees_out(w: &mut World, ledge: &Ledge) {
+// How far, and which way, a point of a leg must move to be out of a wall: `clear`
+// metres out from its face, or `over` metres above its top, whichever is nearer.
+// Nothing for a point that is already one of the two.
+//
+// The way out changes from the face to the top without a step. A point deep in
+// the wall but just under its top goes up a little, and not out a long way, so
+// nothing moves at once when it comes over the edge.
+fn out_of_wall(ledge: &Ledge, at: Vec3, clear: f32, over: f32) -> Vec3 {
+    let out = clear - (at - ledge.edge).dot(ledge.out);
+    let up = ledge.edge.y + over - at.y;
+    if out <= 0.0 || up <= 0.0 {
+        return Vec3::ZERO;
+    }
+    let (out4, up4) = (out * out * out * out, up * up * up * up);
+    let way = ledge.out * (out * up4 / (out4 + up4)) + Vec3::Y * (up * out4 / (out4 + up4));
+    // It starts from nothing with no step in its rate either, so a point that
+    // comes to the wall is slowed and not stopped.
+    let near = out.min(up);
+    way * (near / (near + SOFT_WALL))
+}
+
+/// The depth into a wall's clearance over which a leg is slowed, metres.
+const SOFT_WALL: f32 = 0.03;
+
+// Turn a thigh whose knee the pose has in the wall until the knee is out of it.
+fn knees_out(w: &mut World, ledge: &Ledge, strength: f32) {
     for _ in 0..2 {
         for side in ["l", "r"] {
+            let hip = hold::joint(w, &format!("thigh_{side}"));
             let knee = hold::joint(w, &format!("shin_{side}"));
-            let under = smooth((ledge.edge.y + 0.02 - knee.y) / 0.08);
-            let short = (0.07 - (knee - ledge.edge).dot(ledge.out)) * under;
-            if short > 0.0 {
-                // About the line of the edge, which takes a hanging knee
-                // straight out from the wall.
-                let back = Quat::from_axis_angle(ledge.left(), (short / 0.43).min(0.8));
-                hold::turn_in_world(w, &format!("thigh_{side}"), back);
+            let way = out_of_wall(ledge, knee, 0.09, 0.04) * strength;
+            let axis = (knee - hip).cross(way);
+            if axis.length() > 1e-6 {
+                let turn = Quat::from_axis_angle(axis.normalize(), (way.length() / 0.43).min(0.8));
+                hold::turn_in_world(w, &format!("thigh_{side}"), turn);
             }
         }
     }
 }
 
-// Where a foot the pose has in the wall's face must be moved out to. A foot above
-// the top is over the wall, and is left where it is.
-fn kept_out(w: &World, ledge: &Ledge) -> Vec<Hold> {
+// Where a foot the pose has in the wall must be moved to.
+fn kept_out(w: &World, ledge: &Ledge, strength: f32) -> Vec<Hold> {
     const TOE: Vec3 = Vec3::new(0.0, -0.06, 0.19);
     [(Limb::FootL, "foot_l"), (Limb::FootR, "foot_r")]
         .into_iter()
         .filter_map(|(limb, name)| {
             let ankle = hold::joint(w, name);
-            let short = |at: Vec3, clear: f32| {
-                let under = smooth((ledge.edge.y + 0.02 - at.y) / 0.08);
-                (clear - (at - ledge.edge).dot(ledge.out)) * under
-            };
-            let short = short(ankle, 0.09).max(short(hold::point(w, name, TOE), 0.02));
-            (short > 0.0).then(|| Hold::new(limb, ankle + ledge.out * short).loose())
+            let heel = out_of_wall(ledge, ankle, 0.1, 0.07);
+            let toe = out_of_wall(ledge, hold::point(w, name, TOE), 0.04, 0.03);
+            let way = if toe.length() > heel.length() { toe } else { heel } * strength;
+            (way.length() > 1e-4).then(|| Hold::new(limb, ankle + way).loose())
         })
         .collect()
 }
@@ -1699,15 +1764,18 @@ pub fn present(w: &mut World, motion: Motion) {
             let was = w.get::<Flow>("stickman").map_or(act.code(), |flow| flow.act);
             let cut = was != act.code() || motion.cut;
             flow::carry(w, act.code(), cut.then(|| takes_over(act)));
-            // The wall the body is on, or is about to be on.
+            // The wall the body is on, or is about to be on, and how much the
+            // legs keep out of it: all the way on it, and more and more as it
+            // comes.
             let wall = match &action {
-                Action::Hang(hanging) => Some(hanging.ledge),
-                Action::Climb(climb) => Some(climb.ledge),
-                Action::Air if body.reach > 0.0 => Some(body.ahead),
+                Action::Hang(hanging) => Some((hanging.ledge, 1.0)),
+                Action::Climb(climb) => Some((climb.ledge, 1.0)),
+                Action::Air if body.reach > 0.0 => Some((body.ahead, smooth(body.reach))),
+                Action::Air if body.near > 0.0 => Some((body.low, smooth(body.near))),
                 _ => None,
             };
-            if let Some(wall) = &wall {
-                knees_out(w, wall);
+            if let Some((wall, strength)) = &wall {
+                knees_out(w, wall, *strength);
             }
             let holds = holds(w);
             hold::apply(w, &holds);
@@ -1725,7 +1793,7 @@ pub fn present(w: &mut World, motion: Motion) {
                     Action::Slide { .. } => lifted(w, &floor),
                     // On a wall the feet stay out of its face.
                     _ => match &wall {
-                        Some(wall) => kept_out(w, wall),
+                        Some((wall, strength)) => kept_out(w, wall, *strength),
                         None => break,
                     },
                 };

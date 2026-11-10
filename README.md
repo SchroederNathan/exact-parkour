@@ -36,6 +36,8 @@ A jump starts from the gait. The foot that came down last pushes, and the other 
 
 A climb is one course from a hang to a stand: pull up, press the hips up over the edge, put one foot on the top, rock over it and stand. It takes 1.08 s from a hang. A body that climbs from the ground or catches a lower edge is already part of the way up. It joins the course at its own height, so its pose fits the height of the wall. What the body is off the course when it joins, and how fast, dies away as a spring: a run at the wall carries the body to it, and a fall onto an edge sags and comes back. The catch of a hang works the same way. The leg that led the jump steps onto the top first.
 
+On a wall the legs keep out of it. A knee or a foot that the pose has in the wall moves out by the nearer way, through the face or over the top, and that way changes without a step, so a leg near the edge does not flick in and out. In the air the legs start to keep out of a wall as it comes into sight.
+
 A hanging body stays on the edge until the stick stops pushing at the wall. After that:
 
 | Stick | Result |
@@ -85,11 +87,11 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 80 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 81 hostless tests and the determinism lints.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
-- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick.
+- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick. Another runs 16 catches and climbs and fails if a joint shakes on the wall: if the change of its speed turns round from one tick to the next by more than 0.075 m.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
 
