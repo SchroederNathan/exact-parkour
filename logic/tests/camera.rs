@@ -822,7 +822,7 @@ fn a_slide_lowers_the_eye_and_it_comes_back() {
     sim.run(800.0);
     sim.tap("KeyC");
     sim.run(250.0);
-    assert!(matches!(action(&sim), Action::Slide { .. }));
+    assert!(matches!(action(&sim), Action::Slide(_)));
     let lowered = standing - above(&sim);
     assert!(
         lowered > 0.6 * tune::SLIDE_DROP && lowered < tune::SLIDE_DROP,

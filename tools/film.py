@@ -89,7 +89,7 @@ def main():
     head, frames = lines[0], [f for f in lines[1:] if first <= f["t"] <= last and (f["t"] - first) % every == 0]
     top = head["top"]
     scale = 95.0
-    wall = head["scene"] != "jumps"
+    wall = head["scene"] not in ("jumps", "slide", "ramp")
     cell_w, side_h = 250, 430 if wall else 300
     back_h = side_h if both else 0
     cell_h = side_h + back_h
@@ -100,7 +100,9 @@ def main():
         hips = f["j"]["hips"]
         # The side view follows the hips along the ground and keeps the height.
         # A wall's top stays where it is in the frame; open ground does.
-        base = top - 2.3 if wall else -0.1
+        # On the ramp the frame goes down with the body.
+        ramp = head["scene"] == "ramp"
+        base = top - 2.3 if wall else f["c"][1] - 1.0 if ramp else -0.1
         def side(p):
             return (ox + cell_w / 2 + (p[0] - hips[0]) * scale, oy + side_h - 20 - (p[1] - base) * scale)
         def back(p):
@@ -110,9 +112,13 @@ def main():
         canvas.line((ox, oy), (ox, oy + cell_h - 1), 0.5, (225, 225, 225))
         # Ground, and the wall: its face at zero ahead, its top.
         g = side((hips[0], 0.0))
-        if oy < g[1] < oy + side_h:
+        if ramp:
+            # The ground under the capsule, with the ramp's slope while the body is on it.
+            c, fall = f["c"], 0.325 if f["act"] == "slide" and f["u"] <= 0.5 else 0.0
+            canvas.line(side((c[0] - 1.2, c[1] - 0.92 + 1.2 * fall)), side((c[0] + 1.2, c[1] - 0.92 - 1.2 * fall)), 0.6, grey)
+        elif oy < g[1] < oy + side_h:
             canvas.line((ox + 2, g[1]), (ox + cell_w - 2, g[1]), 0.6, grey)
-        if head["scene"] != "jumps":
+        if wall:
             face = side((0.0, top))
             if ox < face[0] < ox + cell_w:
                 canvas.line(face, (face[0], min(oy + side_h, side((0, 0))[1])), 1.0, (120, 150, 120))
@@ -133,7 +139,10 @@ def main():
             for hand, which in (("hand_l", 1), ("hand_r", 2)):
                 p = view(f["j"][hand])
                 canvas.dot(p[0], p[1], 3, COLORS[which])
-        text(canvas, ox + 5, oy + 5, "%d %s %.2f" % (f["t"], f["act"], f["u"]))
+        note = "%d %s %.2f" % (f["t"], f["act"], f["u"])
+        if "lean" in f:
+            note += " %.1f %.1f" % (f["lean"], f["speed"])
+        text(canvas, ox + 5, oy + 5, note)
     png(out, canvas.w, canvas.h, canvas.px)
     print(out, canvas.w, canvas.h, len(frames), "frames")
 

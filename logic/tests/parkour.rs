@@ -2,7 +2,7 @@
 //! checks the body on every tick, so a pass means the whole course was sound and
 //! not only its end.
 use exact_beat_em_up_logic::body::{self, Action, Parkour, HALF, RADIUS};
-use exact_beat_em_up_logic::{hold, ledge, stickman};
+use exact_beat_em_up_logic::{gait, hold, ledge, stickman};
 use exact_beat_em_up_logic::park::{self, Block};
 use exact_beat_em_up_logic::{ExactBeatEmUp, Options};
 use exact_game::animation::Layers;
@@ -699,6 +699,24 @@ fn a_body_past_an_edge_is_off_it() {
     assert!(down, "rests past the edge: {:?} at {}", action(&game), feet(&game));
 }
 
+// Take the rollers off the ramp, and release no more.
+fn no_rollers(game: &mut Game) {
+    let w = game.world_mut();
+    let rollers: Vec<_> = w.query::<&park::Roller>().iter().map(|(e, _)| e).collect();
+    for roller in rollers {
+        w.despawn(roller);
+    }
+    w.resource_mut::<park::Ramp>().released = u32::MAX;
+}
+
+// The point on the middle of the ramp's top face at `z`.
+fn ramp_at(z: f32) -> Vec3 {
+    let ramp = park::named("ramp");
+    let pitch = degrees(park::RAMP_PITCH);
+    let middle = Vec3::from_array(ramp.at) + Vec3::new(0.0, pitch.cos(), pitch.sin()) * (ramp.size[1] / 2.0);
+    Vec3::new(middle.x, middle.y - (z - middle.z) * pitch.tan(), z)
+}
+
 // Run north from the origin for `ms`, sprinting or not, then press `key`.
 fn run_then(game: &mut Game, sprint: bool, ms: f64, key: &str) {
     place(game, Vec3::new(0.0, 0.0, 20.0), -Vec3::Z);
@@ -718,7 +736,7 @@ fn a_slide_keeps_the_body_moving_and_ends_in_a_run() {
         let mut game = start();
         run_then(&mut game, sprint, 900.0, "KeyC");
         let before = velocity(&game).length();
-        let sliding = run(&mut game, 100.0, &what, |g| matches!(action(g), Action::Slide { .. }));
+        let sliding = run(&mut game, 100.0, &what, |g| matches!(action(g), Action::Slide(_)));
         assert!(sliding, "{what}: no slide, doing {:?}", action(&game));
         let from = feet(&game);
         // Low on the ground the whole way, never slower than most of its speed,
@@ -728,7 +746,7 @@ fn a_slide_keeps_the_body_moving_and_ends_in_a_run() {
         let over = (0..200).any(|_| {
             game.run(TICK_MS);
             check(&game, &what);
-            if !matches!(action(&game), Action::Slide { .. }) {
+            if !matches!(action(&game), Action::Slide(_)) {
                 return true;
             }
             let w = game.world();
@@ -761,10 +779,175 @@ fn a_slide_keeps_the_body_moving_and_ends_in_a_run() {
     let mut game = start();
     run_then(&mut game, true, 900.0, "KeyC");
     run(&mut game, 250.0, "slide", |_| false);
-    assert!(matches!(action(&game), Action::Slide { .. }));
+    assert!(matches!(action(&game), Action::Slide(_)));
     game.tap("Space");
     let up = run(&mut game, 100.0, "jump", |g| matches!(action(g), Action::Air));
     assert!(up, "doing {:?}", action(&game));
+}
+
+fn pace(game: &Game) -> f32 {
+    let v = velocity(game);
+    Vec3::new(v.x, 0.0, v.z).length()
+}
+
+// How far the joint `name` is above the ground under it.
+fn above(game: &Game, name: &str) -> f32 {
+    let at = hold::joint(game.world(), name);
+    at.y - ledge::ground(game.world(), at + Vec3::Y * 0.5, 2.0).unwrap_or(0.0)
+}
+
+#[test]
+fn a_slide_leans_into_its_turn_with_that_hand_on_the_ground() {
+    // North, the left is west.
+    for (side, name, down, free) in [(1.0, "left", "hand_l", "hand_r"), (-1.0, "right", "hand_r", "hand_l")] {
+        let what = format!("slide to the {name}");
+        let mut game = start();
+        run_then(&mut game, true, 900.0, "KeyC");
+        let sliding = run(&mut game, 100.0, &what, |g| matches!(action(g), Action::Slide(_)));
+        assert!(sliding, "{what}: no slide, doing {:?}", action(&game));
+        steer(&mut game, turned(-Vec3::Z, degrees(70.0 * side)));
+        let (mut touched, mut riding) = (0, 0);
+        for _ in 0..200 {
+            game.run(TICK_MS);
+            check(&game, &what);
+            let Action::Slide(slide) = action(&game) else {
+                break;
+            };
+            if let Some((bone, depth)) = buried(&game) {
+                assert!(depth < 0.05, "{what}: {bone} is {depth} m under the ground");
+            }
+            // The middle of the ride. After it the trunk comes forward, and
+            // the hand leaves the ground.
+            if (0.44..0.58).contains(&slide.phase) {
+                riding += 1;
+                assert!(slide.lean * side > 0.6, "{what}: leans {} at {}", slide.lean, slide.phase);
+                touched += (above(&game, down) < hold::WRIST + 0.03) as u32;
+                let high = above(&game, free);
+                assert!(high > 0.25, "{what}: the other hand is {high} m above the ground");
+            }
+        }
+        assert!(touched > riding * 3 / 4, "{what}: the hand was down for {touched} ticks of {riding}");
+        // The lean turned the slide that way.
+        let v = velocity(&game);
+        assert!(v.x * side < -2.0, "{what}: went {v}");
+    }
+}
+
+#[test]
+fn a_slide_shifts_its_weight_from_side_to_side_without_a_step() {
+    // Down the ramp, where a slide is long. South, the left is east.
+    let mut game = start();
+    no_rollers(&mut game);
+    place(&mut game, ramp_at(-12.8), Vec3::Z);
+    game.run(60.0);
+    steer(&mut game, Vec3::Z);
+    game.key_down("ShiftLeft");
+    run(&mut game, 200.0, "ramp", |_| false);
+    game.tap("KeyC");
+    let sliding = run(&mut game, 100.0, "ramp", |g| matches!(action(g), Action::Slide(_)));
+    assert!(sliding, "no slide, doing {:?}", action(&game));
+    let mut leans = vec![];
+    let worst = worst_snap(&mut game, 140, |game, tick| {
+        if let Action::Slide(slide) = action(game) {
+            leans.push(slide.lean);
+        }
+        // The stick comes back to its middle before each new direction, so
+        // the direction is read against the view as it is then. The view is
+        // still on its way round behind a body that was put down facing it.
+        match tick {
+            4 | 49 | 94 => steer(game, Vec3::ZERO),
+            5 | 95 => steer(game, turned(Vec3::Z, degrees(30.0))),
+            50 => steer(game, turned(Vec3::Z, degrees(-30.0))),
+            _ => {}
+        }
+        // In the middle of the ramp, clear of its rails.
+        let aside = feet(game).x - park::named("ramp").at[0];
+        assert!(aside.abs() < 1.6, "the slide went {aside} m to the side");
+    });
+    assert_eq!(leans.len(), 140, "the slide ended on the slope");
+    assert!(worst.0 < 0.1, "{} moved {} m at tick {}", worst.1, worst.0, worst.2);
+    // Over to the left, then to the right, then to the left again.
+    let most = |ticks: std::ops::Range<usize>| {
+        leans[ticks].iter().copied().fold((0.0f32, 0.0f32), |(low, high), lean| (low.min(lean), high.max(lean)))
+    };
+    assert!(most(5..50).1 > 0.5, "to the left: {:?}", most(5..50));
+    assert!(most(50..95).0 < -0.5, "to the right: {:?}", most(50..95));
+    assert!(most(95..140).1 > 0.5, "to the left again: {:?}", most(95..140));
+    let step = leans.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+    assert!(step < 0.1, "the lean changed {step} in one tick");
+}
+
+#[test]
+fn a_slide_down_a_slope_gains_speed_and_keeps_it_for_the_run() {
+    let mut game = start();
+    no_rollers(&mut game);
+    place(&mut game, ramp_at(-12.8), Vec3::Z);
+    game.run(60.0);
+    steer(&mut game, Vec3::Z);
+    game.key_down("ShiftLeft");
+    run(&mut game, 400.0, "ramp", |_| false);
+    let running = pace(&game);
+    assert!((running - gait::SPRINT).abs() < 0.1, "ran down the ramp at {running} m/s");
+    game.tap("KeyC");
+    let sliding = run(&mut game, 100.0, "ramp", |g| matches!(action(g), Action::Slide(_)));
+    assert!(sliding, "no slide, doing {:?}", action(&game));
+    // It lasts as long as the slope does, faster on every tick, and lies on
+    // the slope with its hand and its feet on it.
+    let mut fastest = running;
+    while feet(&game).z < -3.0 {
+        game.run(TICK_MS);
+        check(&game, "ramp");
+        let Action::Slide(slide) = action(&game) else {
+            panic!("the slide ended on the slope at {}: {:?}", feet(&game), action(&game));
+        };
+        assert!(slide.speed > fastest, "slowed to {} m/s at {}", slide.speed, feet(&game));
+        fastest = slide.speed;
+        if let Some((bone, depth)) = buried(&game) {
+            assert!(depth < 0.05, "{bone} is {depth} m under the slope");
+        }
+        if slide.phase >= body::SLIDE_RIDE {
+            for (name, most) in [("hand_l", hold::WRIST + 0.03), ("foot_r", hold::ANKLE + 0.03), ("foot_l", 0.2)] {
+                let over = above(&game, name);
+                assert!(over < most, "{name} is {over} m above the slope");
+            }
+            let hips = above(&game, "hips");
+            assert!(hips < 0.4, "the hips are {hips} m above the slope");
+        }
+    }
+    assert!(fastest > running + 1.2, "the slope took it to {fastest} m/s only");
+    // On the level it comes up, and runs on faster than its legs alone do. It
+    // loses that slowly.
+    let up = run(&mut game, 1500.0, "ramp", |g| matches!(action(g), Action::Ground));
+    assert!(up, "never came up: {:?}", action(&game));
+    assert!(pace(&game) > running + 1.0, "came up at {} m/s", pace(&game));
+    run(&mut game, 300.0, "ramp", |_| false);
+    assert!(pace(&game) > running + 0.4, "ran on at {} m/s", pace(&game));
+    run(&mut game, 1500.0, "ramp", |_| false);
+    assert!((pace(&game) - running).abs() < 0.1, "still at {} m/s", pace(&game));
+}
+
+#[test]
+fn a_slide_up_a_slope_loses_its_speed() {
+    // The same slide on the level and up the ramp from its foot.
+    let after = |uphill: bool| {
+        let mut game = start();
+        no_rollers(&mut game);
+        let x = if uphill { 14.0 } else { 20.0 };
+        place(&mut game, Vec3::new(x, 0.0, 4.0), -Vec3::Z);
+        game.run(60.0);
+        steer(&mut game, -Vec3::Z);
+        game.key_down("ShiftLeft");
+        run(&mut game, 3000.0, "uphill", |g| feet(g).z < -2.6);
+        let before = pace(&game);
+        game.tap("KeyC");
+        let sliding = run(&mut game, 100.0, "uphill", |g| matches!(action(g), Action::Slide(_)));
+        assert!(sliding, "no slide, doing {:?}", action(&game));
+        run(&mut game, 400.0, "uphill", |_| false);
+        before - pace(&game)
+    };
+    let (level, uphill) = (after(false), after(true));
+    assert!(level < 0.7, "a slide on the level lost {level} m/s");
+    assert!(uphill > level + 1.0, "a slide uphill lost {uphill} m/s, and {level} on the level");
 }
 
 #[test]
@@ -778,7 +961,7 @@ fn a_finger_that_slides_between_touch_buttons_presses_each() {
     run(&mut game, 500.0, "glide", |_| false);
     assert!(velocity(&game).length() > run_speed + 2.0, "no sprint: {}", velocity(&game));
     game.post("touch slide");
-    let sliding = run(&mut game, 100.0, "glide", |g| matches!(action(g), Action::Slide { .. }));
+    let sliding = run(&mut game, 100.0, "glide", |g| matches!(action(g), Action::Slide(_)));
     assert!(sliding, "doing {:?}", action(&game));
     run(&mut game, 1200.0, "glide", |g| matches!(action(g), Action::Ground));
     game.post("touch jump");
@@ -983,7 +1166,10 @@ fn trace() {
 //
 // `SCENE` is `wall` (run at `BLOCK` and jump `NEAR` metres from it; `UP` presses
 // jump again at that tick), `jumps` (run north and jump at each tick in `AT`),
-// or `gap` (the run of roofs, from roof `FROM`).
+// `gap` (the run of roofs, from roof `FROM`), `slide` (run north and slide at
+// each tick in `AT`) or `ramp` (the same, down the ramp from its top). In the
+// last two, `TURN` is a list of `tick:degrees`: from that tick the stick points
+// that far to the left of the way the run began, and the views turn with the body.
 #[test]
 #[ignore]
 fn film() {
@@ -1046,8 +1232,35 @@ fn film() {
             let face = Vec3::new(to.at[0], 0.0, to.at[2] - to.size[2] / 2.0);
             (face, Vec3::Z, to.top(), up)
         }
+        "slide" | "ramp" => {
+            let (from, way) = if scene == "ramp" {
+                no_rollers(&mut game);
+                (ramp_at(-12.8), Vec3::Z)
+            } else {
+                (Vec3::new(0.0, 0.0, 22.0), -Vec3::Z)
+            };
+            place(&mut game, from, way);
+            game.run(60.0);
+            steer(&mut game, way);
+            if sprint {
+                game.key_down("ShiftLeft");
+            }
+            let at = var("AT", "90");
+            let presses = at.split(',').map(|s| s.parse().unwrap()).collect();
+            (from, way, 0.0, presses)
+        }
         other => panic!("film: no scene `{other}`"),
     };
+    let sliding = matches!(scene.as_str(), "slide" | "ramp");
+    let turns: Vec<(usize, f32)> = std::env::var("TURN").map_or(vec![], |s| {
+        s.split(',')
+            .map(|turn| {
+                let (tick, angle) = turn.split_once(':').unwrap();
+                (tick.parse().unwrap(), angle.parse().unwrap())
+            })
+            .collect()
+    });
+    let began = ahead;
     let left = Vec3::Y.cross(ahead);
     writeln!(out, "{{\"top\":{top},\"scene\":\"{scene}\"}}").unwrap();
     const JOINTS: [&str; 17] = [
@@ -1060,10 +1273,30 @@ fn film() {
             if std::env::var("RELEASE").is_ok() {
                 steer(&mut game, Vec3::ZERO);
             }
-            game.tap("Space");
+            game.tap(if sliding { "KeyC" } else { "Space" });
+        }
+        // The stick comes back to its middle one tick before a turn, so the
+        // new direction is read against the view as it is then.
+        if turns.iter().any(|turn| turn.0 == tick + 1) {
+            steer(&mut game, Vec3::ZERO);
+        }
+        if let Some((_, angle)) = turns.iter().find(|turn| turn.0 == tick) {
+            steer(&mut game, turned(began, degrees(*angle)));
         }
         game.run(TICK_MS);
         let w = game.world();
+        // A slide is seen from beside and behind the body, whichever way it goes.
+        let (ahead, left) = if sliding {
+            let yaw = w.require::<Parkour>("player").yaw;
+            let facing = Vec3::new(yaw.sin(), 0.0, yaw.cos());
+            (facing, Vec3::Y.cross(facing))
+        } else {
+            (ahead, left)
+        };
+        let lean = match action(&game) {
+            Action::Slide(slide) => format!("\"lean\":{:.2},\"speed\":{:.2},", slide.lean, slide.speed),
+            _ => String::new(),
+        };
         let (kind, u) = match action(&game) {
             Action::Ground => ("ground", 0.0),
             Action::Air => ("air", 0.0),
@@ -1071,7 +1304,7 @@ fn film() {
             Action::Climb(c) => ("climb", c.time),
             Action::Hang(h) => ("hang", h.time),
             Action::Roll { .. } => ("roll", 0.0),
-            Action::Slide { .. } => ("slide", 0.0),
+            Action::Slide(slide) => ("slide", slide.phase),
             Action::Land { .. } => ("land", 0.0),
             Action::Ragdoll => ("ragdoll", 0.0),
             Action::Rise { .. } => ("rise", 0.0),
@@ -1090,7 +1323,7 @@ fn film() {
         }
         writeln!(
             out,
-            "{{\"t\":{tick},\"act\":\"{kind}\",\"u\":{u:.3},\"c\":{},\"j\":{{{}}}}}",
+            "{{\"t\":{tick},\"act\":\"{kind}\",\"u\":{u:.3},{lean}\"c\":{},\"j\":{{{}}}}}",
             flat(centre(&game)),
             joints.join(",")
         )

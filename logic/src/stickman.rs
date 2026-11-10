@@ -678,14 +678,36 @@ fn vault(rig: &Rig) -> Clip {
     )
 }
 
-// A slide on the right foot and the left hand: the body sits back and to the
-// left, low over the ground, the left leg long in front, the right arm out for
-// balance. The holds put the foot, the heel and the hand on the ground; these
-// keys are the trunk and the limbs between holds.
-fn slide(rig: &Rig) -> Clip {
+/// The slide's clips, and the lean each is drawn for: -1 all the way to the
+/// right, 0 straight on, 1 all the way to the left.
+pub const LEANS: [(f32, &str); 3] = [(-1.0, "slide-right"), (0.0, "slide"), (1.0, "slide-left")];
+
+// A slide on the right foot and one hand. Straight on, the body sits back and a
+// little to the left, low over the ground, the left leg long in front, the left
+// hand behind it on the ground and the right arm out for balance. Leaning left
+// it is further over that hand, and the right arm is higher. Leaning right it
+// is over on its right side: the right hand is behind it for the ground, the
+// left arm is out, and the head looks into the turn. `lean` is which of the
+// three this is. The holds put the feet and the hand on the ground; these keys
+// are the trunk and the limbs between holds.
+fn slide(rig: &Rig, name: &str, lean: f32) -> Clip {
+    let (left, right) = (lean.max(0.0), (-lean).max(0.0));
+    // How far the hips roll at each of the three, from how far they roll
+    // straight on; to the left is negative. `share` is how much of the lean a
+    // moment has.
+    let roll = |straight: f32, share: f32| straight + share * (0.98 * right - 0.26 * left);
+    let pick = |straight: [f32; 3], to_left: [f32; 3], to_right: [f32; 3]| {
+        if lean > 0.0 {
+            to_left
+        } else if lean < 0.0 {
+            to_right
+        } else {
+            straight
+        }
+    };
     keyed(
         rig,
-        "slide",
+        name,
         1.0,
         &[
             Key {
@@ -708,7 +730,7 @@ fn slide(rig: &Rig) -> Clip {
                 at: 0.18,
                 drop: 0.2,
                 joints: &[
-                    ("hips", [-0.25, 0.0, -0.08]),
+                    ("hips", [-0.25, 0.0, roll(-0.08, 0.2)]),
                     ("spine", [0.3, 0.0, 0.0]),
                     ("upper_arm_l", [0.7, 0.0, 0.35]),
                     ("forearm_l", [-0.5, 0.0, 0.0]),
@@ -725,13 +747,13 @@ fn slide(rig: &Rig) -> Clip {
                 at: 0.3,
                 drop: 0.74,
                 joints: &[
-                    ("hips", [-1.05, 0.0, -0.36]),
-                    ("spine", [0.4, 0.1, 0.1]),
-                    ("neck", [0.55, -0.1, 0.1]),
-                    ("upper_arm_l", [0.9, 0.0, 0.5]),
-                    ("forearm_l", [-0.5, 0.0, 0.0]),
-                    ("upper_arm_r", [-0.5, 0.0, -1.0]),
-                    ("forearm_r", [-1.2, 0.0, 0.0]),
+                    ("hips", [-1.05, 0.0, roll(-0.36, 1.0)]),
+                    ("spine", pick([0.4, 0.1, 0.1], [0.4, 0.15, 0.2], [0.4, -0.1, -0.2])),
+                    ("neck", pick([0.55, -0.1, 0.1], [0.55, 0.2, 0.2], [0.55, -0.3, -0.1])),
+                    ("upper_arm_l", pick([0.9, 0.0, 0.5], [0.9, 0.0, 0.65], [-0.4, 0.0, 1.1])),
+                    ("forearm_l", pick([-0.5, 0.0, 0.0], [-0.4, 0.0, 0.0], [-1.1, 0.0, 0.0])),
+                    ("upper_arm_r", pick([-0.5, 0.0, -1.0], [-0.5, 0.0, -1.3], [0.9, 0.0, -0.5])),
+                    ("forearm_r", pick([-1.2, 0.0, 0.0], [-1.0, 0.0, 0.0], [-0.5, 0.0, 0.0])),
                     ("thigh_l", [-0.7, 0.0, 0.0]),
                     ("shin_l", [0.2, 0.0, 0.0]),
                     ("thigh_r", [-1.3, 0.0, -0.1]),
@@ -743,13 +765,13 @@ fn slide(rig: &Rig) -> Clip {
                 at: 0.5,
                 drop: 0.7,
                 joints: &[
-                    ("hips", [-0.9, 0.0, -0.36]),
-                    ("spine", [0.35, 0.15, 0.1]),
-                    ("neck", [0.45, -0.1, 0.1]),
-                    ("upper_arm_l", [0.9, 0.0, 0.5]),
-                    ("forearm_l", [-0.5, 0.0, 0.0]),
-                    ("upper_arm_r", [-0.2, 0.0, -1.2]),
-                    ("forearm_r", [-0.9, 0.0, 0.0]),
+                    ("hips", [-0.9, 0.0, roll(-0.36, 1.0)]),
+                    ("spine", pick([0.35, 0.15, 0.1], [0.35, 0.2, 0.2], [0.35, -0.15, -0.2])),
+                    ("neck", pick([0.45, -0.1, 0.1], [0.45, 0.2, 0.2], [0.45, -0.3, -0.1])),
+                    ("upper_arm_l", pick([0.9, 0.0, 0.5], [0.9, 0.0, 0.65], [-0.2, 0.0, 1.2])),
+                    ("forearm_l", pick([-0.5, 0.0, 0.0], [-0.4, 0.0, 0.0], [-0.9, 0.0, 0.0])),
+                    ("upper_arm_r", pick([-0.2, 0.0, -1.2], [-0.3, 0.0, -1.5], [0.9, 0.0, -0.5])),
+                    ("forearm_r", pick([-0.9, 0.0, 0.0], [-0.7, 0.0, 0.0], [-0.5, 0.0, 0.0])),
                     ("thigh_l", [-0.65, 0.0, 0.0]),
                     ("shin_l", [0.15, 0.0, 0.0]),
                     ("thigh_r", [-1.3, 0.0, -0.1]),
@@ -760,13 +782,13 @@ fn slide(rig: &Rig) -> Clip {
                 at: 0.76,
                 drop: 0.52,
                 joints: &[
-                    ("hips", [-0.6, 0.0, -0.2]),
-                    ("spine", [0.45, 0.05, 0.05]),
-                    ("neck", [0.25, 0.0, 0.05]),
-                    ("upper_arm_l", [0.7, 0.0, 0.45]),
-                    ("forearm_l", [-0.5, 0.0, 0.0]),
-                    ("upper_arm_r", [-0.9, 0.0, -0.5]),
-                    ("forearm_r", [-1.2, 0.0, 0.0]),
+                    ("hips", [-0.6, 0.0, roll(-0.2, 0.6)]),
+                    ("spine", pick([0.45, 0.05, 0.05], [0.45, 0.1, 0.1], [0.45, -0.05, -0.12])),
+                    ("neck", pick([0.25, 0.0, 0.05], [0.25, 0.1, 0.1], [0.25, -0.1, -0.05])),
+                    ("upper_arm_l", pick([0.7, 0.0, 0.45], [0.7, 0.0, 0.5], [-0.6, 0.0, 0.6])),
+                    ("forearm_l", pick([-0.5, 0.0, 0.0], [-0.5, 0.0, 0.0], [-1.1, 0.0, 0.0])),
+                    ("upper_arm_r", pick([-0.9, 0.0, -0.5], [-0.9, 0.0, -0.7], [0.7, 0.0, -0.45])),
+                    ("forearm_r", pick([-1.2, 0.0, 0.0], [-1.1, 0.0, 0.0], [-0.5, 0.0, 0.0])),
                     ("thigh_l", [-0.7, 0.0, 0.0]),
                     ("shin_l", [0.4, 0.0, 0.0]),
                     ("thigh_r", [-1.3, 0.0, -0.1]),
@@ -778,7 +800,7 @@ fn slide(rig: &Rig) -> Clip {
                 at: 0.88,
                 drop: 0.28,
                 joints: &[
-                    ("hips", [0.15, 0.0, -0.05]),
+                    ("hips", [0.15, 0.0, roll(-0.05, 0.15)]),
                     ("spine", [0.5, 0.0, 0.0]),
                     ("neck", [-0.25, 0.0, 0.0]),
                     ("upper_arm_l", [0.8, 0.0, 0.3]),
@@ -992,9 +1014,9 @@ pub fn model(rig: &Rig) -> Model {
         vault(rig),
         crouch(rig),
         roll(rig),
-        slide(rig),
         kneel(rig),
     ];
+    clips.extend(LEANS.map(|(lean, name)| slide(rig, name, lean)));
     clips.extend(crate::air::clips(rig));
     clips.extend(crate::rise::clips(rig));
     clips.extend(PACES.iter().map(|p| gait::clip(rig, p)));
@@ -1005,7 +1027,8 @@ pub fn model(rig: &Rig) -> Model {
 
 /// One state per `Act`, and from each an edge to every other on the number `act`.
 /// `move` blends the stance and the gaits along `pace` (m/s); `air` blends the jump
-/// from a stand into the one from a sprint along `stride` (m/s). Every state but
+/// from a stand into the one from a sprint along `stride` (m/s); `slide` blends
+/// the slide to the right into the one to the left along `lean`. Every state but
 /// `move` holds its clip still
 /// and the game sets its phase, so the pose follows the move's own progress. No
 /// state fades in: `flow` carries the pose of one move into the next.
@@ -1029,7 +1052,7 @@ pub fn animator() -> Animator {
             Act::Climb => State::clip(name, "climb").speed(0.0),
             Act::Roll => State::clip(name, "roll").speed(0.0),
             Act::Land => State::clip(name, "crouch").speed(0.0),
-            Act::Slide => State::clip(name, "slide").speed(0.0),
+            Act::Slide => State::blend(name, Blend::across(LEANS).parameter("lean")).speed(0.0),
             Act::Rise => State::blend(
                 name,
                 Blend::across([(0.0, "rise-prone"), (1.0, "rise-supine")]).parameter("supine"),
@@ -1047,6 +1070,7 @@ pub fn animator() -> Animator {
     let mut animator = Animator::new(states);
     animator.set("pace", 0.0);
     animator.set("stride", 0.0);
+    animator.set("lean", 0.0);
     animator.set("act", Act::Move.code());
     animator.set("supine", 0.0);
     animator
