@@ -125,3 +125,34 @@ pub fn ground(w: &World, point: Vec3, drop: f32) -> Option<f32> {
         .filter(|hit| hit.normal.y > FLAT)
         .map(|hit| hit.point.y)
 }
+
+/// Half the width of the place a body stands on, metres: about a foot.
+pub const FOOTING: f32 = 0.1;
+
+/// Whether a body whose capsule rests on something has nothing under its feet:
+/// the capsule is as wide as the shoulders, and its rim will sit on an edge that
+/// the feet are already past. Returns the way off that edge, away from what the
+/// rim rests on. `None` when the feet have ground, or when the rim rests on
+/// nothing this can see, such as a prop.
+pub fn overhang(w: &World, centre: Vec3) -> Option<Vec3> {
+    let feet = centre - Vec3::Y * HALF;
+    let under = |at: Vec3| ground(w, at + Vec3::Y * 0.25, 0.5).is_some();
+    let around = |far: f32| {
+        (0..8).map(move |i| {
+            let (sin, cos) = math::sin_cos(i as f32 * std::f32::consts::FRAC_PI_4);
+            Vec3::new(sin * far, 0.0, cos * far)
+        })
+    };
+    if under(feet) || around(FOOTING).any(|aside| under(feet + aside)) {
+        return None;
+    }
+    // The rim can be on the edge's corner with the feet already below the top,
+    // so what it rests on is looked for higher and further out than the feet.
+    let rests = |at: Vec3| ground(w, at + Vec3::Y * 0.45, 0.7).is_some();
+    let rest: Vec3 = around(RADIUS)
+        .chain(around(RADIUS + 0.15))
+        .filter(|aside| rests(feet + *aside))
+        .sum();
+    let away = (-rest).normalize_or_zero();
+    (away != Vec3::ZERO).then_some(away)
+}

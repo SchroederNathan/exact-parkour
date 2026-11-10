@@ -101,6 +101,14 @@ fn check(game: &Game, what: &str) {
     if let (Some(doing), Some((bone, depth)), false) = (on_wall, buried(game), catching) {
         assert!(depth < 0.05, "{what}: {bone} is {depth} m inside a wall in a {doing}");
     }
+    // On its feet, the body has ground under its feet, and not only under the
+    // rim of its capsule.
+    if matches!(action(game), Action::Ground) {
+        assert!(
+            ledge::overhang(game.world(), at).is_none(),
+            "{what}: stands past an edge at {at}"
+        );
+    }
     // Under its own control the body is never inside a wall.
     if matches!(action(game), Action::Ground | Action::Air) {
         assert!(
@@ -261,7 +269,9 @@ fn a_jump_at_a_deep_wall_climbs_onto_it() {
                 yaw: block.yaw + face,
                 ..*block
             };
-            approach(&mut game, &turned_block, slant, 3.0, 0.5, false);
+            // South of the first roof the next one is 1.5 m away: start in the gap.
+            let back = if (name, face) == ("gap-1", 0.0) { 1.1 } else { 3.0 };
+            approach(&mut game, &turned_block, slant, back, 0.5, false);
             let what = format!("climb {name} at {slant} degrees");
             let climbing = run(&mut game, 100.0, &what, |g| {
                 matches!(action(g), Action::Climb(_))
@@ -647,6 +657,47 @@ fn a_jump_from_the_end_of_an_edge_goes_where_the_stick_aims() {
     assert!(back > 1.5, "landed {back} m from the wall");
 }
 
+#[test]
+fn a_body_past_an_edge_is_off_it() {
+    let roof = park::named("tower-1");
+    let edge = roof.at[0] + roof.size[0] / 2.0;
+    // Creeping east off the roof: the feet are never further past the edge than
+    // a foot is wide while the body still stands.
+    let mut game = start();
+    place(&mut game, Vec3::new(edge - 0.8, roof.top(), roof.at[2]), Vec3::X);
+    game.run(60.0);
+    let event = |phase, x: f32| InputEvent::Control {
+        name: "move".into(),
+        id: 1,
+        phase,
+        x,
+        y: 100.0,
+        at_ms: 0.0,
+        player: 0,
+    };
+    game.input(event(PointerPhase::Down, 100.0));
+    game.input(event(PointerPhase::Move, 118.0));
+    let mut furthest = f32::MIN;
+    let down = (0..900).any(|_| {
+        game.run(TICK_MS);
+        check(&game, "creep");
+        if matches!(action(&game), Action::Ground) && feet(&game).y > roof.top() - 0.05 {
+            furthest = furthest.max(feet(&game).x - edge);
+        }
+        feet(&game).y < 0.1
+    });
+    assert!(down, "never came off the roof: {:?} at {}", action(&game), feet(&game));
+    assert!(furthest < ledge::FOOTING + 0.03, "stood {furthest} m past the edge");
+    assert!(furthest > -0.1, "left the roof {furthest} m before its edge");
+
+    // Put down with its feet 0.2 m past the edge and no push: it does not rest
+    // there on the rim of its capsule.
+    let mut game = start();
+    place(&mut game, Vec3::new(edge + 0.2, roof.top(), roof.at[2]), Vec3::X);
+    let down = run(&mut game, 2500.0, "rim", |g| feet(g).y < 0.1);
+    assert!(down, "rests past the edge: {:?} at {}", action(&game), feet(&game));
+}
+
 // Run north from the origin for `ms`, sprinting or not, then press `key`.
 fn run_then(game: &mut Game, sprint: bool, ms: f64, key: &str) {
     place(game, Vec3::new(0.0, 0.0, 20.0), -Vec3::Z);
@@ -924,3 +975,4 @@ fn trace() {
         );
     }
 }
+

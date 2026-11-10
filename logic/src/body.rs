@@ -85,6 +85,8 @@ pub const HARD: f32 = 9.0;
 /// Ground speed a roll needs, m/s.
 const ROLL_SPEED: f32 = 1.2;
 
+/// How fast a body whose feet are past an edge goes off it, m/s.
+const SLIP: f32 = 1.2;
 /// A slide: the slowest ground speed it starts from, m/s, how long it lasts,
 /// seconds, the share of its speed it ends with, and how fast it steers, rad/s.
 pub const SLIDE_MIN: f32 = 2.5;
@@ -559,14 +561,31 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
     };
     let moved = physics::capsule(w, "player").step(velocity);
     let speed = planar(moved.displacement).length() / dt;
+    // The body stands on its feet, not on the rim of its capsule. With its feet
+    // past an edge it is off that edge, and goes on out until the rim is too.
+    let slip = if moved.grounded {
+        ledge::overhang(w, w.require::<Transform>("player").position)
+    } else {
+        None
+    };
+    if let Some(away) = slip {
+        let mut c = w.require_mut::<CapsuleController>("player");
+        c.grounded = false;
+        c.support = None;
+        let out = planar(c.velocity).dot(away);
+        if out < SLIP {
+            c.velocity += away * (SLIP - out);
+        }
+    }
+    let grounded = moved.grounded && slip.is_none();
     let mut motion = Motion {
         speed,
         rising: velocity.y,
-        grounded: moved.grounded,
+        grounded,
         ..Motion::default()
     };
 
-    if moved.grounded {
+    if grounded {
         body.reach = 0.0;
         let impact = if was_grounded { 0.0 } else { body.fall };
         body.airtime = 0.0;
