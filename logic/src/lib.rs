@@ -41,6 +41,7 @@ impl Game for ExactBeatEmUp {
             .stick("move", Stick::wasd().or_arrows().or_pad(Pad::Left))
             .button("jump", &["Space", "GamepadSouth"])
             .button("sprint", &["ShiftLeft", "ShiftRight", "GamepadL3", "GamepadR1"])
+            .button("slide", &["KeyC", "ControlLeft", "GamepadEast"])
     }
 
     fn setup(w: &mut World, args: &Options) {

@@ -68,8 +68,9 @@ pub struct Hold {
     pub at: Vec3,
     /// How firmly, 0 to 1: a move eases a hold in and out with this.
     pub grip: f32,
-    /// Whether a foot stands on what it holds, and so is flat.
-    pub flat: bool,
+    /// How much a foot is flat on what it holds, 0 to 1: all of it when it
+    /// stands there, none when it only passes.
+    pub flat: f32,
     /// Where the elbow or knee bends to, from the middle of the limb, in the
     /// body's frame, if not the limb's usual way.
     pub bend: Option<Vec3>,
@@ -80,7 +81,7 @@ impl Hold {
             limb,
             at,
             grip: 1.0,
-            flat: limb.is_foot(),
+            flat: if limb.is_foot() { 1.0 } else { 0.0 },
             bend: None,
         }
     }
@@ -92,8 +93,11 @@ impl Hold {
         self.grip = grip;
         self
     }
-    pub fn loose(mut self) -> Self {
-        self.flat = false;
+    pub fn loose(self) -> Self {
+        self.flat(0.0)
+    }
+    pub fn flat(mut self, flat: f32) -> Self {
+        self.flat = flat.clamp(0.0, 1.0);
         self
     }
 }
@@ -204,14 +208,14 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
                     weight: 1.0,
                 };
                 solve_ik(model, &mut local, &ik).expect("the limb's chain is in the rig");
-                if hold.flat {
+                if hold.flat > 0.0 {
                     // A foot that stands is flat, whatever the shin does.
                     let shin = joint_matrix(model, &local, node(model, chain[1]))
                         .to_scale_rotation_translation()
                         .1;
                     let slot = node(model, chain[2]) as usize * 10 + 3;
                     let was = Quat::from_slice(&local[slot..slot + 4]);
-                    let flat = was.slerp(shin.inverse(), weight).normalize();
+                    let flat = was.slerp(shin.inverse(), weight * hold.flat).normalize();
                     local[slot..slot + 4].copy_from_slice(&flat.to_array());
                 }
                 weight

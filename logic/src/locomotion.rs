@@ -8,7 +8,7 @@
 //! From a stand that makes the first motion a push off the planted foot while the
 //! other swings through; to a stand, the last step closes onto it.
 use crate::gait::{self, PACES};
-use crate::stickman::LAND_LAYER;
+use crate::stickman::{KNEEL_LAYER, LAND_LAYER};
 use exact_game::animation::Layers;
 use crate::body::{Act, Motion};
 use exact_game::*;
@@ -32,8 +32,7 @@ const CADENCE_MAX: f32 = 2.6;
 const DRAG: f32 = 0.15;
 /// Ground speed (m/s) under which the body counts as stopped.
 const STILL: f32 = 0.1;
-/// Downward speed (m/s) of a full landing crouch.
-const HARD_LANDING: f32 = 5.0;
+
 
 /// The stride (metres per cycle) and period (seconds per cycle) of the blend at `pace`.
 pub fn stride_at(pace: f32) -> (f32, f32) {
@@ -155,7 +154,7 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     let held = match motion.act {
         Act::Move | Act::Air => None,
         Act::Hang => Some(0.0),
-        Act::Vault | Act::Climb | Act::Roll | Act::Land | Act::Rise => {
+        Act::Vault | Act::Climb | Act::Roll | Act::Land | Act::Rise | Act::Slide => {
             Some(motion.progress.min(0.999))
         }
     };
@@ -169,11 +168,17 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
             }
         }
     }
-    // The knees give on a soft touchdown; a harder one has its own move.
-    if motion.impact > 0.0 && motion.act == Act::Move {
+    // The knees give on a soft touchdown, more the harder it is. A harder one
+    // the body kneels into, and so it comes up out of a hard roll.
+    if motion.kneel > 0.0 {
+        let mut layers = w.require_mut::<Layers>(target);
+        let kneel = &mut layers.0[KNEEL_LAYER];
+        kneel.weight = motion.kneel.min(1.0);
+        kneel.animation.time = 0.0;
+    } else if motion.impact > 0.0 && motion.act == Act::Move {
         let mut layers = w.require_mut::<Layers>(target);
         let land = &mut layers.0[LAND_LAYER];
-        land.weight = (motion.impact / HARD_LANDING).clamp(0.35, 1.0);
+        land.weight = (motion.impact / crate::body::SOFT).clamp(0.3, 1.0);
         land.animation.time = 0.0;
     }
 }

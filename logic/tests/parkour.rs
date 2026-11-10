@@ -2,9 +2,10 @@
 //! checks the body on every tick, so a pass means the whole course was sound and
 //! not only its end.
 use exact_beat_em_up_logic::body::{self, Action, Parkour, HALF, RADIUS};
-use exact_beat_em_up_logic::{hold, ledge};
+use exact_beat_em_up_logic::{hold, ledge, stickman};
 use exact_beat_em_up_logic::park::{self, Block};
 use exact_beat_em_up_logic::{ExactBeatEmUp, Options};
+use exact_game::animation::Layers;
 use exact_game::{InputEvent, PointerPhase, Sim, Transform, Vec3};
 use exact_game_physics::{self as physics, CapsuleController, Shape};
 
@@ -428,19 +429,27 @@ fn drop_from(game: &mut Game, name: &str, pace: Option<bool>) -> Action {
 }
 
 #[test]
-fn a_drop_of_two_metres_is_rolled_out_or_crouched_out() {
-    // Running off: a roll that keeps the body moving, then back on its feet.
+fn a_drop_from_a_roof_is_knelt_out_rolled_out_or_crouched_out() {
+    // Running off a 2 m roof: the body kneels into the landing and runs on.
     let mut game = start();
     let landing = drop_from(&mut game, "tower-1", Some(false));
+    assert!(matches!(landing, Action::Ground), "{landing:?}");
+    run(&mut game, 300.0, "kneel", |_| false);
+    assert!(velocity(&game).length() > 3.0, "stopped: {}", velocity(&game));
+
+    // Running off a 2.8 m wall: a roll that keeps the body moving, then back on
+    // its feet.
+    let mut game = start();
+    let landing = drop_from(&mut game, "ledge-high", Some(false));
     assert!(matches!(landing, Action::Roll { .. }), "{landing:?}");
     let rolled_from = feet(&game);
     let up = run(&mut game, 2000.0, "roll", |g| matches!(action(g), Action::Ground));
     assert!(up);
     assert!((feet(&game) - rolled_from).length() > 1.0, "the roll covers ground");
 
-    // Stepping off with no speed: down to the hands, then up, in place.
+    // Stepping off it with no speed: down to the hands, then up, in place.
     let mut game = start();
-    let landing = drop_from(&mut game, "tower-1", None);
+    let landing = drop_from(&mut game, "ledge-high", None);
     assert!(matches!(landing, Action::Land { .. }), "{landing:?}");
     let up = run(&mut game, 2500.0, "crouch", |g| matches!(action(g), Action::Ground));
     assert!(up);
@@ -521,14 +530,16 @@ fn a_hanging_body_shimmies_along_the_edge_to_its_ends() {
             // Level, flat against the wall, and both hands on the edge.
             let at = centre(&game);
             assert!((at.y - level).abs() < 1e-4, "{what}: rose or sank to {}", at.y);
+            // A hand has let go when the body leans out past the end of the edge.
+            let now = body::holds(game.world());
             for (i, off) in off_the_edge(&game).into_iter().enumerate() {
-                assert!(off < 0.01, "{what}: hand {i} is {off} m off the edge at tick {tick}");
+                let holds = now[i].grip == 1.0;
+                assert!(!holds || off < 0.01, "{what}: hand {i} is {off} m off the edge at tick {tick}");
             }
             // A hand that holds the same place on the edge does not move.
-            let now = body::holds(game.world());
             let wrists_now = now.clone().map_holds(&game);
             for i in 0..2 {
-                if (now[i].at - was[i].at).length() < 1e-5 {
+                if (now[i].at - was[i].at).length() < 1e-5 && now[i].grip == 1.0 && was[i].grip == 1.0 {
                     let slid = (wrists_now[i] - wrists[i]).length();
                     assert!(slid < 0.004, "{what}: a planted hand slid {slid} m");
                 }
@@ -547,6 +558,28 @@ fn a_hanging_body_shimmies_along_the_edge_to_its_ends() {
         assert!((to - from) * side > 1.0, "{what}: went {} m", (to - from) * side);
         let short = half - to * side;
         assert!((0.3..0.6).contains(&short), "{what}: stopped {short} m from the end");
+        // At the end, with the stick still pushed, it leans out to look along the
+        // wall: it hangs from the hand on that side, and the other has let go.
+        run(&mut game, 600.0, &what, |_| false);
+        let Action::Hang(hanging) = action(&game) else {
+            panic!("{what}: left the edge");
+        };
+        assert!((hanging.lean - side).abs() < 1e-3, "{what}: leans {}", hanging.lean);
+        let holds = body::holds(game.world());
+        let (lead, trail) = if side > 0.0 { (0, 1) } else { (1, 0) };
+        assert_eq!(holds[lead].grip, 1.0);
+        assert_eq!(holds[trail].grip, 0.0);
+        assert!(off_the_edge(&game)[lead] < 0.02, "{what}: the hand it hangs from is off the edge");
+        // The stick let go, it comes back under both hands.
+        steer(&mut game, Vec3::ZERO);
+        run(&mut game, 600.0, &what, |_| false);
+        let Action::Hang(hanging) = action(&game) else {
+            panic!("{what}: left the edge");
+        };
+        assert_eq!(hanging.lean, 0.0);
+        for off in off_the_edge(&game) {
+            assert!(off < 0.01, "{what}: a hand is {off} m off the edge after the lean");
+        }
     }
 
     // From anywhere on the edge, forward climbs.
@@ -566,6 +599,203 @@ impl Wrists for Vec<hold::Hold> {
             .map(|h| hold::joint(game.world(), h.limb.chain()[2]))
             .collect()
     }
+}
+
+#[test]
+fn a_jump_from_the_end_of_an_edge_goes_where_the_stick_aims() {
+    let from = park::named("ledge-mid");
+    let (middle, out) = south_face(from);
+    let left = Vec3::Y.cross(-out);
+    // To the right is a higher wall, a metre away: the body catches its edge.
+    // To the left is a lower one: the body lands on its top.
+    for (side, to, hangs) in [(-1.0, "ledge-high", true), (1.0, "ledge-low", false)] {
+        let to = park::named(to);
+        let what = format!("leap to {}", to.name);
+        let mut game = start();
+        hang_from(&mut game, from);
+        steer(&mut game, Vec3::ZERO);
+        run(&mut game, 400.0, &what, |_| false);
+        steer(&mut game, left * side);
+        let at_end = run(&mut game, 6000.0, &what, |g| {
+            matches!(action(g), Action::Hang(h) if (h.lean - side).abs() < 1e-3)
+        });
+        assert!(at_end, "{what}: never leaned at the end");
+        game.tap("Space");
+        let off = run(&mut game, 100.0, &what, |g| matches!(action(g), Action::Air));
+        assert!(off, "{what}: no jump, doing {:?}", action(&game));
+        let there = run(&mut game, 2500.0, &what, |g| {
+            matches!(action(g), Action::Hang(_))
+                || (matches!(action(g), Action::Ground) && (feet(g).y - to.top()).abs() < 0.05)
+        });
+        assert!(there, "{what}: ended {:?} at {}", action(&game), feet(&game));
+        assert_eq!(matches!(action(&game), Action::Hang(_)), hangs, "{what}");
+        let across = (centre(&game) - middle).dot(left) * side;
+        assert!(across > from.size[0] / 2.0 + 1.0, "{what}: got {across} m along the wall");
+    }
+
+    // Away from the wall, a jump leaves it backward, further than letting go.
+    let mut game = start();
+    hang_from(&mut game, from);
+    steer(&mut game, Vec3::ZERO);
+    run(&mut game, 400.0, "jump off", |_| false);
+    steer(&mut game, out);
+    game.tap("Space");
+    let down = run(&mut game, 2500.0, "jump off", |g| !matches!(action(g), Action::Air | Action::Hang(_)));
+    assert!(down);
+    let back = (feet(&game) - middle).dot(out);
+    assert!(back > 1.5, "landed {back} m from the wall");
+}
+
+// Run north from the origin for `ms`, sprinting or not, then press `key`.
+fn run_then(game: &mut Game, sprint: bool, ms: f64, key: &str) {
+    place(game, Vec3::new(0.0, 0.0, 20.0), -Vec3::Z);
+    game.run(60.0);
+    steer(game, -Vec3::Z);
+    if sprint {
+        game.key_down("ShiftLeft");
+    }
+    run(game, ms, "run up", |_| false);
+    game.tap(key);
+}
+
+#[test]
+fn a_slide_keeps_the_body_moving_and_ends_in_a_run() {
+    for sprint in [true, false] {
+        let what = format!("slide, sprint {sprint}");
+        let mut game = start();
+        run_then(&mut game, sprint, 900.0, "KeyC");
+        let before = velocity(&game).length();
+        let sliding = run(&mut game, 100.0, &what, |g| matches!(action(g), Action::Slide { .. }));
+        assert!(sliding, "{what}: no slide, doing {:?}", action(&game));
+        let from = feet(&game);
+        // Low on the ground the whole way, never slower than most of its speed,
+        // with a hand on the ground and no part of it under the ground.
+        let mut lowest = f32::MAX;
+        let mut touched = 0;
+        let over = (0..200).any(|_| {
+            game.run(TICK_MS);
+            check(&game, &what);
+            if !matches!(action(&game), Action::Slide { .. }) {
+                return true;
+            }
+            let w = game.world();
+            assert!(velocity(&game).length() > before * 0.8, "{what}: slowed to {}", velocity(&game));
+            lowest = lowest.min(hold::joint(w, "hips").y);
+            touched += (hold::joint(w, "hand_l").y < hold::WRIST + 0.02) as u32;
+            if let Some((bone, depth)) = buried(&game) {
+                assert!(depth < 0.05, "{what}: {bone} is {depth} m under the ground");
+            }
+            false
+        });
+        assert!(over, "{what}: never ended");
+        assert!(matches!(action(&game), Action::Ground), "{what}: ended {:?}", action(&game));
+        assert!(lowest < 0.4, "{what}: the hips came down to {lowest} m only");
+        assert!(touched > 30, "{what}: the hand was on the ground for {touched} ticks");
+        let far = (feet(&game) - from).length();
+        assert!(far > before * body::SLIDE * 0.85, "{what}: slid {far} m");
+        // It runs on at the speed it had.
+        run(&mut game, 400.0, &what, |_| false);
+        assert!(velocity(&game).length() > before * 0.95, "{what}: {}", velocity(&game));
+    }
+
+    // Too slow to slide: nothing happens.
+    let mut game = start();
+    game.tap("KeyC");
+    run(&mut game, 100.0, "still", |_| false);
+    assert!(matches!(action(&game), Action::Ground));
+
+    // A jump cuts a slide short.
+    let mut game = start();
+    run_then(&mut game, true, 900.0, "KeyC");
+    run(&mut game, 250.0, "slide", |_| false);
+    assert!(matches!(action(&game), Action::Slide { .. }));
+    game.tap("Space");
+    let up = run(&mut game, 100.0, "jump", |g| matches!(action(g), Action::Air));
+    assert!(up, "doing {:?}", action(&game));
+}
+
+#[test]
+fn a_finger_that_slides_between_touch_buttons_presses_each() {
+    // The app posts these when a finger that went down on one button arrives on
+    // another; the button it went down on still holds the touch.
+    let mut game = start();
+    run_then(&mut game, false, 600.0, "KeyQ");
+    let run_speed = velocity(&game).length();
+    game.post("touch sprint on");
+    run(&mut game, 500.0, "glide", |_| false);
+    assert!(velocity(&game).length() > run_speed + 2.0, "no sprint: {}", velocity(&game));
+    game.post("touch slide");
+    let sliding = run(&mut game, 100.0, "glide", |g| matches!(action(g), Action::Slide { .. }));
+    assert!(sliding, "doing {:?}", action(&game));
+    run(&mut game, 1200.0, "glide", |g| matches!(action(g), Action::Ground));
+    game.post("touch jump");
+    let up = run(&mut game, 100.0, "glide", |g| matches!(action(g), Action::Air));
+    assert!(up, "doing {:?}", action(&game));
+    game.post("touch sprint off");
+    run(&mut game, 1500.0, "glide", |g| matches!(action(g), Action::Ground));
+    run(&mut game, 600.0, "glide", |_| false);
+    assert!((velocity(&game).length() - run_speed).abs() < 0.3, "still sprints: {}", velocity(&game));
+}
+
+// Drop from `height` metres over open ground at `pace` m/s, and report the
+// landing: what the body is doing, how deep it kneels, and its speed after.
+fn land_from(height: f32, pace: f32) -> (Action, f32, f32) {
+    let mut game = start();
+    place(&mut game, Vec3::new(0.0, height, 20.0), -Vec3::Z);
+    game.world_mut().require_mut::<CapsuleController>("player").velocity = -Vec3::Z * pace;
+    if pace > 0.0 {
+        steer(&mut game, -Vec3::Z);
+    }
+    let what = format!("land from {height} m");
+    let mut kneel = 0.0f32;
+    let landed = (0..600).any(|_| {
+        game.run(TICK_MS);
+        check(&game, &what);
+        let layers = game.get::<Layers>("stickman").unwrap();
+        let layer = &layers.0[stickman::KNEEL_LAYER];
+        if layer.animation.time < 0.05 {
+            kneel = kneel.max(layer.weight);
+        }
+        !matches!(action(&game), Action::Air)
+    });
+    assert!(landed, "{what}: never landed");
+    game.run(TICK_MS);
+    let layers = game.get::<Layers>("stickman").unwrap();
+    let layer = &layers.0[stickman::KNEEL_LAYER];
+    if layer.animation.time < 0.05 {
+        kneel = kneel.max(layer.weight);
+    }
+    (action(&game), kneel, velocity(&game).length())
+}
+
+#[test]
+fn a_landing_is_as_deep_as_the_fall_is_high() {
+    // A step down: the knees give, and the run goes on.
+    let (doing, kneel, speed) = land_from(0.5, 3.4);
+    assert!(matches!(doing, Action::Ground), "{doing:?}");
+    assert_eq!(kneel, 0.0);
+    assert!(speed > 3.0, "{speed}");
+    // Higher: the body kneels into it, deeper from higher, and still runs on.
+    let (doing, low, speed) = land_from(1.2, 3.4);
+    assert!(matches!(doing, Action::Ground), "{doing:?}");
+    assert!(speed > 3.0, "{speed}");
+    let (doing, high, speed) = land_from(1.9, 3.4);
+    assert!(matches!(doing, Action::Ground), "{doing:?}");
+    assert!(speed > 3.0, "{speed}");
+    assert!(0.5 < low && low < high && high <= 1.0, "kneels {low} then {high}");
+    // Higher still: a roll, longer and slower out of it from higher.
+    let (light, _, _) = land_from(2.5, 3.4);
+    let (heavy, _, _) = land_from(3.9, 3.4);
+    let (Action::Roll { span: a, strain: s, .. }, Action::Roll { span: b, strain: t, .. }) = (&light, &heavy) else {
+        panic!("{light:?} and {heavy:?}");
+    };
+    assert!(a < b && s < t, "rolls {a} s and {b} s");
+    // With no speed to roll with, a crouch to the hands.
+    let (doing, _, _) = land_from(3.0, 0.0);
+    assert!(matches!(doing, Action::Land { .. }), "{doing:?}");
+    // Too high: nothing saves it.
+    let (doing, _, _) = land_from(6.0, 3.4);
+    assert!(matches!(doing, Action::Ragdoll), "{doing:?}");
 }
 
 // The drawn body's bones as sampled points, each with its bone's name.
@@ -642,7 +872,8 @@ fn trace() {
     let block = park::named(&name);
     let mut game = start();
     let near: f32 = std::env::var("NEAR").map_or(0.6, |s| s.parse().unwrap());
-    approach(&mut game, block, slant, 3.0, near, false);
+    let back: f32 = std::env::var("BACK").map_or(3.0, |s| s.parse().unwrap());
+    approach(&mut game, block, slant, back, near, false);
     for tick in 0..260 {
         game.run(TICK_MS);
         if std::env::var("UP").is_ok() && tick == 120 {
@@ -665,7 +896,7 @@ fn trace() {
             for (bone, at) in bones(&game) {
                 let before = (at - middle).dot(out);
                 let over = at.y - block.top();
-                if before < 0.0 && over < 0.0 {
+                if before < 0.0 && before > -block.size[2] && over < 0.0 {
                     println!("{tick:3} {kind} {u:.2} {bone} {before:+.3}/{over:+.3}");
                 }
             }
