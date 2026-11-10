@@ -116,6 +116,9 @@ impl Game for ExactBeatEmUp {
                 color: Some(sky),
                 ..Fog::new(0.018, 0.08)
             }),
+            // A race runs in the shadow of tall buildings: more light from the sky
+            // keeps a shaded roof readable.
+            ambient: if args.mode == RACE_MODE { 0.85 } else { 0.5 },
             ..Environment::default()
         });
         physics::register(w);

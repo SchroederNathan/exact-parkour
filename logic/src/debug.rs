@@ -7,6 +7,7 @@
 //! - `camera <x> <y> <z>`: hold the camera that far from the body's centre, looking
 //!   at it. `camera 0 0 0`, or a drag on the scene, gives it back to the rig.
 //! - `roller <kind> <speed>`: send roller `kind` at the body from behind its back.
+//! - `checkpoint <n>`: in a race, stand the body on checkpoint `n`, as a fall does.
 use crate::body::{self, Parkour};
 use crate::park;
 use exact_game::*;
@@ -42,6 +43,11 @@ pub fn commands(w: &mut World, input: &Input) {
                 c.velocity = Vec3::ZERO;
                 c.grounded = false;
                 c.support = None;
+            }
+            ("checkpoint", &[index]) => {
+                if w.try_resource::<crate::race::Course>().is_some() {
+                    crate::race::place(w, index as u32);
+                }
             }
             ("camera", &[x, y, z]) => {
                 crate::camera::set_offset(w, Vec3::new(x, y, z));
