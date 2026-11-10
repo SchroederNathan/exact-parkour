@@ -1,9 +1,102 @@
-use exact_beat_em_up_logic::race::{definition, ROUTES};
+mod bot;
+
+use exact_beat_em_up_logic::body::HALF;
+use exact_beat_em_up_logic::ledge;
+use exact_beat_em_up_logic::race::{self, kit::Kind};
+use exact_game::Vec3;
 
 #[test]
-fn registry_keeps_three_distinct_routes() {
-    assert_eq!(ROUTES.len(), 3);
-    assert_ne!(definition(0).title, definition(1).title);
-    assert_ne!(definition(1).title, definition(2).title);
-    assert!(ROUTES.iter().all(|route| route.blocks.len() >= 7));
+fn every_race_has_a_name_a_route_and_a_finish() {
+    let mut titles = Vec::new();
+    for id in 0..race::COUNT {
+        let level = race::level(id);
+        assert!(!level.title.is_empty() && !level.subtitle.is_empty());
+        assert!(level.checkpoints.len() >= 2, "{}: no checkpoints", level.title);
+        assert!(
+            level.pieces.iter().any(|p| p.kind == Kind::Solid),
+            "{}: nothing to stand on",
+            level.title
+        );
+        titles.push(level.title);
+    }
+    titles.dedup();
+    assert_eq!(titles.len(), race::COUNT as usize, "two races share a name");
+}
+
+// A checkpoint is a place to stand: on a surface, clear of every wall, above the
+// height that counts as a fall. The finish is too.
+#[test]
+fn every_checkpoint_is_a_place_to_stand() {
+    for id in 0..race::COUNT {
+        let level = race::level(id);
+        let game = bot::start(id);
+        let w = game.world();
+        let mut names: Vec<&str> = level.pieces.iter().map(|p| p.name.as_str()).collect();
+        names.sort();
+        for pair in names.windows(2) {
+            assert_ne!(pair[0], pair[1], "{}: two pieces are named {}", level.title, pair[0]);
+        }
+        assert!(level.pieces.len() <= 400, "{}: {} pieces", level.title, level.pieces.len());
+        let spots = level
+            .checkpoints
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (format!("checkpoint {i}"), c.at, c.floor))
+            .chain([("the finish".to_string(), level.finish, f32::MIN)]);
+        for (what, at, floor) in spots {
+            let what = format!("{}: {what} at {at:?}", level.title);
+            let at = Vec3::from_array(at);
+            let ground = ledge::ground(w, at + Vec3::Y * 0.5, 1.0);
+            assert!(
+                ground.is_some_and(|y| (y - at.y).abs() < 0.05),
+                "{what}: the surface under it is at {ground:?}"
+            );
+            assert!(ledge::clear(w, at + Vec3::Y * (HALF + 0.03)), "{what}: inside a wall");
+            assert!(floor < at.y - 1.5, "{what}: its fall line {floor} is too near");
+            assert!(floor == f32::MIN || floor >= 3.0, "{what}: its fall line {floor} is under the street");
+        }
+    }
+}
+
+// Write one level as JSON for `tools/map.py`: `LEVEL=0 OUT=/tmp/level.json`.
+#[test]
+#[ignore]
+fn dump() {
+    let id: u8 = std::env::var("LEVEL").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let out = std::env::var("OUT").unwrap_or_else(|_| "/tmp/level.json".into());
+    let level = race::level(id);
+    let list = |v: &[f32]| {
+        let parts: Vec<String> = v.iter().map(|n| format!("{n}")).collect();
+        format!("[{}]", parts.join(","))
+    };
+    let pieces: Vec<String> = level
+        .pieces
+        .iter()
+        .map(|p| {
+            format!(
+                r#"{{"name":"{}","at":{},"size":{},"yaw":{},"pitch":{},"look":"{:?}","kind":"{:?}"}}"#,
+                p.name,
+                list(&p.at),
+                list(&p.size),
+                p.yaw,
+                p.pitch,
+                p.look,
+                p.kind
+            )
+        })
+        .collect();
+    let checkpoints: Vec<String> = level
+        .checkpoints
+        .iter()
+        .map(|c| format!(r#"{{"at":{},"toward":{},"floor":{}}}"#, list(&c.at), list(&c.toward), c.floor))
+        .collect();
+    let json = format!(
+        r#"{{"title":"{}","pieces":[{}],"checkpoints":[{}],"finish":{}}}"#,
+        level.title,
+        pieces.join(","),
+        checkpoints.join(","),
+        list(&level.finish)
+    );
+    std::fs::write(&out, json).unwrap();
+    println!("{} pieces, written to {out}", level.pieces.len());
 }
