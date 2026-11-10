@@ -1057,26 +1057,51 @@ pub fn holds(w: &World) -> Vec<Hold> {
             let unfacing = Quat::from_rotation_y(-w.require::<Parkour>("player").yaw);
             // Where the feet will stand at the end of the climb.
             let stand = path.to - Vec3::Y * (HALF + 0.01);
-            // A foot comes up outside the wall's face to over its top, knee out to
-            // the side, and then goes in onto the top, where it stands. It starts
-            // when the feet's level is `from` metres from the edge and is down
-            // at `to`, and no sooner than the climb is well begun. `clear` is how
-            // far out from the face it comes up, metres.
-            let step = |limb: Limb, side: f32, from: f32, to: f32, clear: f32, spread: f32| {
-                let gate = smooth((level - from) / (to - from)).min(smooth(path.progress() / 0.45));
+            // A foot comes up close beside the wall's face, toes down, to just
+            // over the edge, and steps in onto the top with its knee up in front
+            // of the body, as on a high stair. It starts when the feet's level
+            // is `from` metres from the edge and is down at `to`: not before the
+            // hips are level with the edge, so the knee has room over the top.
+            // `clear` is how far out from the face it comes up, and `onto` is
+            // where on the top it steps, both in metres from the edge.
+            let top = Vec3::new(ledge.edge.x, stand.y, ledge.edge.z);
+            // A climb from the ground starts a step or two from the wall. A foot
+            // does not go up onto the top until the body is at the wall.
+            let off = (centre - ledge.edge).dot(ledge.out);
+            let near = smooth((0.5 - off) / 0.15);
+            let step = |side: f32, from: f32, to: f32, clear: f32, onto: f32| {
+                let gate = smooth((level - from) / (to - from))
+                    .min(smooth(path.progress() / 0.45))
+                    .min(near);
                 let beside = ledge.left() * (side * 0.09);
                 let lifted = ledge.edge + ledge.out * clear + beside + Vec3::Y * 0.2;
-                let down = stand + beside - ledge.inward() * 0.03 + Vec3::Y * hold::ANKLE;
+                let down = top + ledge.inward() * onto + beside + Vec3::Y * hold::ANKLE;
                 let carry = smooth((gate - 0.5) / 0.5);
-                // The knee goes out along the wall, wherever the body faces, and
-                // comes to the front as the foot goes in.
-                let out = unfacing
-                    * (ledge.left() * (side * spread) + ledge.out * 0.1 + Vec3::Y * (1.1 - spread));
-                let knee = out.lerp(Vec3::new(side * 0.1, 0.3, 0.8), carry);
-                Hold::new(limb, lifted.lerp(down, carry))
-                    .grip(smooth(gate / 0.5))
-                    .bend(knee)
+                // The knee comes up before it goes in, a little to its own side.
+                let up = unfacing * (ledge.left() * (side * 0.4)) + Vec3::Y;
+                let over = unfacing * (ledge.left() * (side * 0.2) + ledge.inward() * 0.4)
+                    + Vec3::Y * 0.8;
+                let knee = up.lerp(over, carry);
+                // The toes point down while the foot comes up beside the wall,
+                // and level as it comes over the edge.
+                let level = smooth((gate - 0.35) / 0.3);
+                (lifted.lerp(down, carry), smooth(gate / 0.5), level, knee)
             };
+            // The first foot steps onto the top by the edge and takes the weight.
+            // The second steps past it to where the body will stand, and the
+            // first then closes up beside it.
+            let behind = 0.15;
+            let ahead = (stand - top).dot(ledge.inward()) - 0.03;
+            let (first, grip, flat, knee) = step(-1.0, -0.95, -0.55, 0.12, behind);
+            let closes = smooth((path.progress() - 0.8) / 0.2);
+            let closed = first
+                + ledge.inward() * ((ahead - behind) * closes)
+                + Vec3::Y * (0.06 * math::sin(std::f32::consts::PI * closes));
+            let (second, grip_l, flat_l, knee_l) = step(1.0, -0.6, -0.2, 0.06, ahead);
+            let feet = [
+                Hold::new(Limb::FootR, closed).grip(grip).flat(flat).bend(knee),
+                Hold::new(Limb::FootL, second).grip(grip_l).flat(flat_l).bend(knee_l),
+            ];
             // The hands press on the edge with the elbows coming up over them,
             // move in onto the top as the chest comes over, and let go when the
             // feet have the weight.
@@ -1094,11 +1119,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
                         .bend(elbow)
                 })
                 .collect();
-            // One foot goes onto the top as the hips reach it, and the body stands
-            // up over that foot. The other follows when the body is over the top,
-            // and so comes up closer to the face.
-            holds.push(step(Limb::FootR, -1.0, -1.3, -0.7, 0.32, 0.8));
-            holds.push(step(Limb::FootL, 1.0, -1.1, -0.3, 0.2, 0.45));
+            holds.extend(feet);
             holds
         }
         _ => vec![],
