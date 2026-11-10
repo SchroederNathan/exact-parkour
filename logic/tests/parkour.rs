@@ -1097,3 +1097,96 @@ fn film() {
         .unwrap();
     }
 }
+
+// The furthest a wrist or an ankle moved in one tick, beyond what the capsule
+// itself moved, over `ticks` ticks. `press` is called before each tick with its
+// number.
+fn worst_snap(game: &mut Game, ticks: usize, mut press: impl FnMut(&mut Game, usize)) -> (f32, &'static str, usize) {
+    const TIPS: [&str; 4] = ["hand_l", "hand_r", "foot_l", "foot_r"];
+    let at = |game: &Game| TIPS.map(|name| hold::joint(game.world(), name));
+    let mut before = (at(game), centre(game));
+    let mut worst = (0.0f32, "", 0);
+    for tick in 0..ticks {
+        press(game, tick);
+        game.run(TICK_MS);
+        let now = (at(game), centre(game));
+        let carried = (now.1 - before.1).length();
+        for (i, name) in TIPS.into_iter().enumerate() {
+            let moved = (now.0[i] - before.0[i]).length() - carried;
+            if moved > worst.0 {
+                worst = (moved, name, tick);
+            }
+        }
+        before = now;
+    }
+    worst
+}
+
+#[test]
+fn no_hand_or_foot_snaps_between_ticks() {
+    // A limb that swings fast in a sprint passes the body at 0.07 m a tick, and
+    // a foot that steps onto a top out of a sprint's leap at a little more. A
+    // change of pose in one tick, or a hold that takes a limb at once, is
+    // several times that.
+    const MOST: f32 = 0.1;
+    let mut failures = vec![];
+    let mut report = |what: &str, worst: (f32, &'static str, usize)| {
+        println!("{what}: {} moved {:.3} m at tick {}", worst.1, worst.0, worst.2);
+        if worst.0 > MOST {
+            failures.push(format!("{what}: {} moved {} m at tick {}", worst.1, worst.0, worst.2));
+        }
+    };
+    // Jumps from a stand, a run and a sprint, each twice in a row.
+    for (what, moving, sprint) in [("stand", false, false), ("run", true, false), ("sprint", true, true)] {
+        let mut game = start();
+        place(&mut game, Vec3::new(0.0, 0.0, 22.0), -Vec3::Z);
+        game.run(60.0);
+        if moving {
+            steer(&mut game, -Vec3::Z);
+        }
+        if sprint {
+            game.key_down("ShiftLeft");
+        }
+        game.run(500.0);
+        let worst = worst_snap(&mut game, 320, |game, tick| {
+            if tick == 10 || tick == 110 || tick == 117 {
+                game.tap("Space");
+            }
+        });
+        report(&format!("jumps from a {what}"), worst);
+    }
+    // A wall from the ground, a low edge and two high ones out of the air, and
+    // the climb out of each hang.
+    for (name, near, sprint) in [
+        ("mantle", 0.5, false),
+        ("mantle", 0.9, true),
+        ("ledge-low", 0.35, false),
+        ("ledge-mid", 0.35, false),
+        ("ledge-high", 0.35, true),
+        ("ledge-turned", 0.35, false),
+    ] {
+        for slant in [0.0, 25.0] {
+            let mut game = start();
+            approach(&mut game, park::named(name), slant, 3.0, near, sprint);
+            let worst = worst_snap(&mut game, 330, |game, tick| {
+                if tick == 130 {
+                    steer(game, Vec3::ZERO);
+                    game.tap("Space");
+                }
+            });
+            report(&format!("{name} at {slant} degrees, sprint {sprint}"), worst);
+        }
+    }
+    // The sprint across a gap onto a higher roof.
+    let mut game = start();
+    let from = park::named("gap-4");
+    place(&mut game, Vec3::new(from.at[0], from.top(), from.at[2] - 1.0), Vec3::Z);
+    game.run(60.0);
+    steer(&mut game, Vec3::Z);
+    game.key_down("ShiftLeft");
+    run(&mut game, 3000.0, "gap", |g| feet(g).z > from.at[2] + from.size[2] / 2.0 - 0.35);
+    game.tap("Space");
+    let worst = worst_snap(&mut game, 200, |_, _| {});
+    report("gap-4 to gap-5", worst);
+    all_pass(failures, 16);
+}

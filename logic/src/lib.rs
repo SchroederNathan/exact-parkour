@@ -213,6 +213,7 @@ impl Game for ExactBeatEmUp {
                 stickman::layers(),
                 Stride::default(),
                 flow::Flow::default(),
+                hold::Limbs::default(),
             ),
         );
         camera::setup(w);

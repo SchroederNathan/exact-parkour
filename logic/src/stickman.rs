@@ -891,7 +891,7 @@ fn roll(rig: &Rig) -> Clip {
     let curl = |u: f32| smooth(u / 0.2) * (1.0 - smooth((u - 0.6) / 0.4));
     let spin = |u: f32| std::f32::consts::TAU * smooth((u - 0.06) / 0.62);
     // The arms reach for the ground before the body is a ball.
-    let reach = |u: f32| smooth(u / 0.08) * (1.0 - smooth((u - 0.14) / 0.16));
+    let reach = |u: f32| smooth(u / 0.17) * (1.0 - smooth((u - 0.18) / 0.16));
     let rest = rig.bones()[node(rig, "hips") as usize].head;
     // The hips ride the rim of the ball: its middle is in front of the belly, and
     // lower while the body is upside down, when it rolls on its back.

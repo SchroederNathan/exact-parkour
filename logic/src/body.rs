@@ -58,6 +58,8 @@ const GRAB_HIGH: f32 = 2.1;
 /// away at `CATCH` per second.
 pub const SETTLE: f32 = 0.25;
 const SWUNG_IN: f32 = 0.38;
+/// How far from its shoulder a hand goes toward an edge it cannot reach, metres.
+const ARM: f32 = 0.5;
 const CATCH: f32 = 14.0;
 /// How much closer to the wall than the capsule the drawn body hangs, metres: the
 /// capsule is as thick as the body with its arms, and a hanging body is flat.
@@ -312,6 +314,9 @@ pub struct Motion {
     /// ground speed the body left the ground with, m/s.
     pub lead: f32,
     pub stride: f32,
+    /// Whether the pose changes at once this tick with no change of move: a
+    /// jump from the air, or a kneel that a roll opens into.
+    pub cut: bool,
 }
 
 /// The body's own state, beside the controller's.
@@ -517,6 +522,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         (c.grounded, c.velocity)
     };
     let may_jump = was_grounded || body.airtime < COYOTE;
+    let mut jumped = false;
 
     // A jump at a wall is a vault or a climb, if the wall allows one.
     if body.buffer > 0.0 && may_jump {
@@ -544,6 +550,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         .start(&mut c.velocity);
         c.grounded = false;
         body.airtime = COYOTE;
+        jumped = true;
     }
 
     // A slide takes the speed the body has and keeps most of it.
@@ -617,6 +624,7 @@ fn free(w: &mut World, body: &mut Parkour, controls: &Controls) -> Outcome {
         speed,
         rising: velocity.y,
         grounded,
+        cut: jumped,
         ..Motion::default()
     };
 
@@ -1036,10 +1044,19 @@ pub fn holds(w: &World) -> Vec<Hold> {
     let centre = w.require::<Transform>("player").position;
     match &w.require::<Parkour>("player").action {
         // The hands close on the edge over the first moment of the catch.
+        // Until the body has swung in under it, an edge can be further than
+        // an arm is long: the hand is then as far toward it as the arm goes.
         Action::Hang(hanging) => grips(&hanging.ledge, hanging.travel, hanging.lean)
             .map(|hand| {
                 let closed = smooth(hanging.time / 0.08).max(smooth(hanging.reach));
-                hand.grip(hand.grip * closed)
+                let shoulder = hold::joint(w, hand.limb.chain()[0]);
+                let to = hand.at - shoulder;
+                let at = if hanging.time < SWUNG_IN && to.length() > ARM {
+                    shoulder + to.normalize() * ARM
+                } else {
+                    hand.at
+                };
+                Hold { at, ..hand }.grip(hand.grip * closed)
             })
             .to_vec(),
         Action::Air => {
@@ -1051,7 +1068,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
                 holds.extend(grips(&body.ahead, 0.0, 0.0).map(|hand| {
                     let shoulder = hold::joint(w, hand.limb.chain()[0]);
                     let to = hand.at - shoulder;
-                    let at = shoulder + to.normalize_or_zero() * to.length().min(0.5);
+                    let at = shoulder + to.normalize_or_zero() * to.length().min(ARM);
                     Hold::new(hand.limb, at).grip(smooth(body.reach))
                 }));
             }
@@ -1115,10 +1132,12 @@ pub fn holds(w: &World) -> Vec<Hold> {
                     .loose(),
                 Hold::new(Limb::HandL, on(-0.46, 0.4, hold::WRIST))
                     .grip(between(0.1, 0.3, 0.7, 0.86))
+                    .slack(0.6)
                     .bend(Vec3::new(0.5, 0.1, -0.6)),
             ]
         }
-        Action::Vault(path) if path.held => vec![Hold::new(Limb::HandL, path.hand)],
+        // The hand starts for the wall's top well before the shoulder is over it.
+        Action::Vault(path) if path.held => vec![Hold::new(Limb::HandL, path.hand).slack(0.9).firm()],
         Action::Climb(climb) => {
             let ledge = &climb.ledge;
             let (t, joined) = (climb.time, climb.joined);
@@ -1150,7 +1169,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
                     + Vec3::Y * 0.8;
                 // The toes point down while the foot comes up beside the wall,
                 // and level as it comes over the edge.
-                (at, smooth(q / 0.4), smooth((q - 0.55) / 0.3), up.lerp(inside, smooth((q - 0.4) / 0.6)))
+                (at, smooth(q / 0.6), smooth((q - 0.55) / 0.3), up.lerp(inside, smooth((q - 0.4) / 0.6)))
             };
             // The first foot steps onto the top by the edge and takes the
             // weight. The second steps past it to where the body will stand,
@@ -1159,7 +1178,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
             let behind = 0.15;
             let ahead = (stand - top).dot(ledge.inward()) - 0.03;
             let from = joined.max(0.4);
-            let to = (from + 0.18).max(0.72);
+            let to = (from + 0.22).max(0.72);
             // The second knee must be over the top before the hips are.
             let next = (from + 0.06).max(0.68);
             let last = (next + 0.22).max(0.94).min(climb::SPAN - 0.02);
@@ -1272,6 +1291,7 @@ fn roll(w: &mut World, time: f32, span: f32, heading: Vec3, speed: f32, strain: 
             0.0
         },
         kneel_from: 0.22,
+        cut: (time - w.dt()) / span < 0.6 && u >= 0.6,
         ..Motion::default()
     };
     let next = if u < 1.0 {
@@ -1677,7 +1697,8 @@ pub fn present(w: &mut World, motion: Motion) {
                 _ => {}
             }
             let was = w.get::<Flow>("stickman").map_or(act.code(), |flow| flow.act);
-            flow::carry(w, act.code(), (was != act.code()).then(|| takes_over(act)));
+            let cut = was != act.code() || motion.cut;
+            flow::carry(w, act.code(), cut.then(|| takes_over(act)));
             // The wall the body is on, or is about to be on.
             let wall = match &action {
                 Action::Hang(hanging) => Some(hanging.ledge),
@@ -1708,7 +1729,7 @@ pub fn present(w: &mut World, motion: Motion) {
                         None => break,
                     },
                 };
-                hold::apply(w, &lifted);
+                hold::correct(w, &lifted);
             }
             return;
         }

@@ -1,7 +1,7 @@
 //! Carries the pose of one move into the next.
 //!
 //! Each move has its own poses, so a change of move is a change of pose in one
-//! tick. `carry` knows what was shown. At a change it measures how far every joint
+//! tick. `carry` knows the pose it made last. At a change it measures how far every joint
 //! is from where the new move has it, and how fast that joint was turning, and
 //! then lets the difference die away as a spring at rest would. The limbs go on
 //! the way they were going and arrive at the new move: nothing stops and nothing
@@ -18,7 +18,10 @@ const NONE: f32 = 1e-4;
 /// What is left of the pose the body had before its last change of move.
 #[derive(Default, Clone, Component)]
 pub struct Flow {
-    /// The pose shown two ticks ago, ten floats per node.
+    /// The pose this made last tick and the tick before, ten floats per node:
+    /// the body before its hands and feet were put on their holds. The holds
+    /// carry the limbs they take themselves.
+    made: Vec<f32>,
     before: Vec<f32>,
     /// For each node, what it is still off the pose its move asks for: a turn
     /// as a rotation vector and its rate, then a shift and its rate.
@@ -64,6 +67,7 @@ pub fn settle(w: &mut World, act: f32) {
         return;
     };
     flow.off.clear();
+    flow.made.clear();
     flow.before.clear();
     flow.act = act;
 }
@@ -74,18 +78,18 @@ pub fn settle(w: &mut World, act: f32) {
 /// tick: start again from what was shown, and die away at that rate.
 pub fn carry(w: &mut World, act: f32, cut: Option<f32>) {
     let dt = w.dt();
-    let Some((mut local, shown)) = w
-        .get::<Pose>("stickman")
-        .map(|pose| (pose.local.clone(), pose.previous.clone()))
-    else {
+    let Some(mut local) = w.get::<Pose>("stickman").map(|pose| pose.local.clone()) else {
         return;
     };
-    if local.is_empty() || shown.len() != local.len() {
-        return;
-    }
     let Some(mut flow) = w.get::<Flow>("stickman").map(|f| f.clone()) else {
         return;
     };
+    if local.is_empty() {
+        return;
+    }
+    // With nothing made last tick there is nothing to carry.
+    let shown = std::mem::take(&mut flow.made);
+    let cut = cut.filter(|_| shown.len() == local.len());
     let nodes = local.len() / 10;
     if flow.off.len() != nodes * 12 {
         flow.off = vec![0.0; nodes * 12];
@@ -153,6 +157,7 @@ pub fn carry(w: &mut World, act: f32, cut: Option<f32>) {
         }
     }
     flow.before = shown;
+    flow.made = local.clone();
     flow.act = act;
     *w.require_mut::<Flow>("stickman") = flow;
     if any {
