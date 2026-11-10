@@ -8,6 +8,9 @@ pub const SOLID: u32 = 1;
 pub const PROP: u32 = 2;
 /// The player's own capsule, which no probe of the park should find.
 pub const BODY: u32 = 4;
+/// A bar across a path. It stops a body on its feet, and a sliding body goes under
+/// it. It is not `SOLID`, so it has no edge to vault or grab.
+pub const BAR: u32 = 8;
 
 /// One static box. `at` is its centre and `size` its full extents, metres. `yaw` and
 /// `pitch` are degrees about Y, then about the box's own X.

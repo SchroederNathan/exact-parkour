@@ -9,11 +9,11 @@ use crate::flow::{self, Flow};
 use crate::gait::{RUN, SPRINT};
 use crate::hold::{self, Hold, Limb};
 use crate::ledge::{self, Ledge};
-use crate::park::PROP;
+use crate::park::{BAR, PROP};
 use crate::ragdoll::{self, Ragdoll};
 use exact_game::motion::{Gravity, Jump, Move};
 use exact_game::*;
-use exact_game_physics::{self as physics, CapsuleController, Shape};
+use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
 /// The capsule: total height and radius in metres. Its centre is `HALF` above the feet.
 pub const HEIGHT: f32 = 1.8;
@@ -102,6 +102,9 @@ pub const SLIDE_MIN: f32 = 2.5;
 pub const SLIDE: f32 = 0.8;
 const SLIDE_KEEPS: f32 = 0.85;
 const SLIDE_TURN: f32 = 1.5;
+/// The share of a slide that a body under a bar does not go past: it stays low
+/// there until the bar is behind it.
+const SLIDE_HELD: f32 = 0.6;
 /// A jump off an edge the body hangs from: along the edge and up, m/s, and how
 /// long after it the hands still look for the wall it left, seconds.
 const LEAP_ALONG: f32 = 4.0;
@@ -470,6 +473,15 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
         };
     }
     body.action = action;
+    // A sliding body goes under a bar. A body on its feet does not pass one.
+    let mask = if matches!(body.action, Action::Slide { .. }) {
+        !BAR
+    } else {
+        u32::MAX
+    };
+    if w.require::<Collider>("player").mask != mask {
+        w.require_mut::<Collider>("player").mask = mask;
+    }
     // The drawn body is under the capsule, or closer to the wall it climbs. A rise
     // puts it where the body will stand.
     if !matches!(body.action, Action::Rise { .. }) {
@@ -1350,6 +1362,17 @@ fn slide(
     let face = Some(yaw_of(heading, heading));
     if !moved.grounded {
         return (Action::Air, motion, face);
+    }
+    // Under a bar the body cannot stand: the slide holds its low part and goes on
+    // until the body is clear.
+    let at = w.require::<Transform>("player").position;
+    if !ledge::clear_of(w, at, BAR) {
+        let next = Action::Slide {
+            time: time.min(SLIDE * SLIDE_HELD),
+            heading,
+            speed,
+        };
+        return (next, motion, face);
     }
     // Over, stopped by something, or cut short by a jump, which the ground takes.
     if u >= 1.0 || went < 1.0 || body.buffer > 0.0 {

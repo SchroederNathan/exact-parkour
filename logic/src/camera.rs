@@ -292,6 +292,17 @@ pub fn present(w: &mut World, motion: Motion) {
     }
 }
 
+/// Put the view behind a body that faces `yaw`, radians, with no easing. A race
+/// calls it when it stands the runner at a checkpoint.
+pub fn face(w: &mut World, yaw: f32) {
+    let mut rig = w.resource_mut::<Rig>();
+    rig.heading = Heading {
+        frame: math::wrap_angle(yaw - std::f32::consts::PI),
+        ..Heading::default()
+    };
+    rig.cut = true;
+}
+
 /// The `camera <x> <y> <z>` debug command: hold the eye that far from the body's
 /// centre, looking at it. `Vec3::ZERO`, or a drag on the scene, returns to the rig.
 /// Movement stays relative to this view.
