@@ -9,6 +9,9 @@ shape Hud
   subtitle: string
   seconds: number
   finished: bool
+  checkpoint: number
+  checkpoints: number
+  falls: number
   round: number
   enemies: number
   hits: number
@@ -132,6 +135,8 @@ component ExactBeatEmUp
                 text `HOSTILES ${hud.enemies}` padding=10 border-radius=12 background-color="#101822bb" font-variant-numeric="tabular-nums"
               else
                 text `${hud.seconds.toFixed(1)}s` padding=10 border-radius=12 background-color="#101822bb" font-variant-numeric="tabular-nums"
+              if hud.mode == "race"
+                text `${hud.checkpoint} / ${hud.checkpoints}` testId="checkpoints" aria-label=`Checkpoint ${hud.checkpoint} of ${hud.checkpoints}` padding=10 border-radius=12 background-color="#101822bb" font-variant-numeric="tabular-nums"
             row gap=8 pointer-events="auto"
               if paused
                 button appearance="none" press=restart testId="restart" aria-label="Restart" padding=10 border-radius=12 background-color="#2b5364" color="#ffffff"
@@ -143,7 +148,7 @@ component ExactBeatEmUp
               text `DAMAGE ${hud.hits} / 3` font-size=14 color=(hud.hits >= 2 ? "#ff7b7b" : "#c7d8e5") font-variant-numeric="tabular-nums"
               text hud.phase font-size=12 color="#dbe9f1"
           if hud.finished
-            text "FINISH" position="absolute" top="46%" left=0 right=0 padding=18 text-align="center" border-radius=16 background-color="#0b1824dd" font-size=30 font-weight=800
+            text `FINISH  ${hud.seconds.toFixed(1)}s` testId="finish" position="absolute" top="46%" left=0 right=0 padding=18 text-align="center" border-radius=16 background-color="#0b1824dd" font-size=30 font-weight=800
           if paused
             column position="absolute" top="calc(env(safe-area-inset-top) + 78px)" right="calc(env(safe-area-inset-right) + 20px)" padding=16 gap=8 border-radius=16 background-color="#101822ee"
               text "Choose a level" font-weight=700

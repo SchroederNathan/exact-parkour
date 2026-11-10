@@ -24,6 +24,8 @@ use locomotion::Stride;
 
 /// Half the side of the square park, metres.
 pub const PARK: f32 = 30.0;
+/// Half the side of the street under a race's roofs, metres.
+pub const STREET: f32 = 400.0;
 pub const RACE_MODE: u32 = 0;
 pub const ARENA_MODE: u32 = 1;
 const LEGACY_MODE: u32 = 2;
@@ -63,6 +65,9 @@ pub struct Hud {
     pub subtitle: String,
     pub seconds: f32,
     pub finished: bool,
+    pub checkpoint: u32,
+    pub checkpoints: u32,
+    pub falls: u32,
     pub round: u32,
     pub enemies: u32,
     pub hits: u32,
@@ -115,7 +120,15 @@ impl Game for ExactBeatEmUp {
         });
         physics::register(w);
         w.resource_mut::<physics::Physics>().gravity = Vec3::new(0.0, -body::GRAVITY, 0.0);
-        let ground = Mesh::plane(PARK * 2.0, PARK * 2.0);
+        let race = args.mode == RACE_MODE;
+        // A race is on the roofs of a city, and its ground is the street far
+        // below them. The other modes are in the park.
+        let (half, ground_color, grid) = if race {
+            (STREET, "#27313a", 6.0)
+        } else {
+            (PARK, "#365466", 1.0)
+        };
+        let ground = Mesh::plane(half * 2.0, half * 2.0);
         w.spawn_named(
             "platform",
             (
@@ -124,23 +137,29 @@ impl Game for ExactBeatEmUp {
                 // 1 cm slab, which the capsule dips through on its first step.
                 Collider {
                     shape: Shape::Box {
-                        half: Vec3::new(PARK, 1.0, PARK),
+                        half: Vec3::new(half, 1.0, half),
                     },
                     offset: Vec3::new(0.0, -1.0, 0.0),
                     layer: park::SOLID,
                     ..Collider::default()
                 },
                 ground,
-                Material::grid(Color::hex("#365466"), 1.0),
+                Material::grid(Color::hex(ground_color), grid),
             ),
         );
-        // Unseen walls keep every body in the park.
-        for (name, x, z) in [
-            ("wall-east", 1.0, 0.0),
-            ("wall-west", -1.0, 0.0),
-            ("wall-south", 0.0, 1.0),
-            ("wall-north", 0.0, -1.0),
-        ] {
+        // Unseen walls keep every body in the park. A race has none: a runner who
+        // leaves the roofs falls, and starts again at a checkpoint.
+        let walls: &[(&str, f32, f32)] = if race {
+            &[]
+        } else {
+            &[
+                ("wall-east", 1.0, 0.0),
+                ("wall-west", -1.0, 0.0),
+                ("wall-south", 0.0, 1.0),
+                ("wall-north", 0.0, -1.0),
+            ]
+        };
+        for &(name, x, z) in walls {
             let across = Vec3::new(z, 0.0, x).abs();
             w.spawn_named(
                 name,
@@ -156,10 +175,10 @@ impl Game for ExactBeatEmUp {
             );
         }
 
-        if args.mode != ARENA_MODE {
+        if args.mode == LEGACY_MODE {
             park::setup(w);
         }
-        if args.mode == RACE_MODE {
+        if race {
             race::setup(w, args.race as u8);
         }
 
@@ -170,15 +189,19 @@ impl Game for ExactBeatEmUp {
         // The capsule stays upright; the visual is its child and does the turning.
         // It starts half a turn about Y: facing up the screen, away from the camera.
         let half_turn = std::f32::consts::PI;
-        let player_start = if args.mode == RACE_MODE {
-            race::start_position(args.race as u8)
+        let player_start = if race {
+            race::start(args.race as u8).0
         } else {
             Vec3::ZERO
         };
         let player = w.spawn_named(
             "player",
             (
-                Transform::at(player_start.x, body::HALF + 0.01, player_start.z),
+                Transform::at(
+                    player_start.x,
+                    player_start.y + body::HALF + 0.01,
+                    player_start.z,
+                ),
                 CapsuleController {
                     radius: body::RADIUS,
                     height: body::HEIGHT,
@@ -217,6 +240,9 @@ impl Game for ExactBeatEmUp {
             ),
         );
         camera::setup(w);
+        if race {
+            race::place(w, 0);
+        }
         w.spawn_named(
             "sun",
             (
@@ -239,10 +265,10 @@ impl Game for ExactBeatEmUp {
         }
         debug::commands(w, input);
         camera::input(w, input);
-        if args.mode == ARENA_MODE {
-            arena::tick(w);
-        } else {
-            park::tick(w);
+        match args.mode {
+            ARENA_MODE => arena::tick(w),
+            RACE_MODE => race::tick(w),
+            _ => park::tick(w),
         }
         let motion = body::step(w, input);
         physics::step(w);
@@ -250,8 +276,5 @@ impl Game for ExactBeatEmUp {
         animation::step(w);
         body::present(w, motion);
         camera::present(w, motion);
-        if args.mode == RACE_MODE {
-            race::tick(w);
-        }
     }
 }
