@@ -9,8 +9,9 @@ Rooftop Rumble is a small Exact game prototype. A jointed stick man runs, vaults
 | Move | WASD or arrows | Left stick | Move stick (a partial push walks) |
 | Sprint | Hold Shift | Hold L3 or R1 | Hold Sprint |
 | Jump, vault, climb | Space | South button | Jump |
+| Slide | C or Left Control | East button | Slide |
 
-Desktop and web keep the playfield clear. Coarse-pointer devices show the move stick, round Sprint and Jump buttons, and a native glass Pause button. The world draws under the notch and the home indicator; the controls keep clear of them.
+Desktop and web keep the playfield clear. Coarse-pointer devices show the move stick, round Sprint, Slide and Jump buttons, and a native glass Pause button. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
 
 ## Moves
 
@@ -27,17 +28,24 @@ A hanging body stays on the edge until the stick stops pushing at the wall. Afte
 
 | Stick | Result |
 |---|---|
-| Along the wall | Shimmy that way, hand over hand, as far as the edge goes |
-| Toward the wall, or Jump | Climb onto the top |
+| Along the wall | Shimmy that way, hand over hand, as far as the edge goes. At the end of the edge the body leans out past it on one hand |
+| Toward the wall, or Jump with no aim | Climb onto the top |
 | Away from the wall | Let go |
+| Along the wall, and Jump | Leap that way and up, and catch the next edge on the wall if there is one |
+| Away from the wall, and Jump | Jump off the wall, backward |
 
-Landings depend on the downward speed at touchdown.
+A slide starts from 2.5 m/s or more. It lasts 0.8 s, keeps 85 percent of the speed, steers a little, and ends in a run. Jump cuts it short.
+
+Landings depend on the downward speed at touchdown, and each is deeper the harder it is.
 
 | Speed | Drop | Result |
 |---|---|---|
-| Below 5 m/s | Up to about 1.6 m | The knees take it |
-| 5 to 9 m/s | Up to about 4.4 m | A roll if the body is moving, a crouch to the hands if it is not. The recovery is longer for a harder landing |
+| Below 4.2 m/s | Up to about 0.9 m | The knees give |
+| 4.2 to 6.3 m/s | Up to about 2 m | The body kneels into the landing and runs on. The deepest kneel shortens the next stride |
+| 6.3 to 9 m/s | Up to about 4.1 m | A roll if the body is moving, a crouch to the hands if it is not. A harder roll is longer, slower out, and comes up through a deeper kneel |
 | 9 m/s and above | Higher | The body falls as a ragdoll, comes to rest, and gets up |
+
+In the air the pose follows the vertical speed, and the legs unlock in the last fifth of a second before the ground.
 
 A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit shoves it. The ramp releases a ball, a barrel, a crate or a heavy ball every 4.5 seconds.
 
@@ -57,9 +65,9 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 31 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 35 hostless tests and the determinism lints.
 
-- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge.
+- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
 
@@ -70,6 +78,14 @@ BLOCK=ledge-high UP=1 cargo test --manifest-path .shells/Cargo.toml -p exact-bea
 ```
 
 `.cargo/config.toml` turns off debug assertions for the vendored `rapier3d` package only. Its island check panics when the player's kinematic capsule moves in the tick in which a rigid body starts a contact.
+
+The framework checkout is at `/private/tmp/exact-framework-20261109`, which a restart of the Mac removes. To restore it:
+
+```sh
+git clone --no-checkout /Volumes/ExternalSSD/T3Projects/exact2 /private/tmp/exact-framework-20261109
+git -C /private/tmp/exact-framework-20261109 checkout --detach 94b8671f7
+(cd /private/tmp/exact-framework-20261109 && bun install --frozen-lockfile)
+```
 
 ## Commands
 
