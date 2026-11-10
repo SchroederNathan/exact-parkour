@@ -1,8 +1,18 @@
-use exact_beat_em_up_logic::{camera::Orbit, park, ExactBeatEmUp, Options, ARENA_MODE};
+//! What a player sees of the camera: where the runner stands on the screen, how a
+//! finger turns the view, and how the view follows the run.
+use exact_beat_em_up_logic::body::{self, HEIGHT, RADIUS};
+use exact_beat_em_up_logic::camera::{self, tune};
+use exact_beat_em_up_logic::{ExactBeatEmUp, Options, ARENA_MODE};
 use exact_game::*;
-use exact_game_physics::{self as physics, Collider, Shape};
 
-fn start() -> Sim<ExactBeatEmUp> {
+type Game = Sim<ExactBeatEmUp>;
+
+// A little over one 120 Hz tick: each `run` of it advances exactly one.
+const TICK_MS: f64 = 8.334;
+const LANDSCAPE: Vec2 = Vec2::new(932.0, 430.0);
+const PORTRAIT: Vec2 = Vec2::new(430.0, 932.0);
+
+fn start() -> Game {
     let mut sim = Sim::new(Options {
         seed: 7,
         mode: ARENA_MODE,
@@ -13,217 +23,150 @@ fn start() -> Sim<ExactBeatEmUp> {
     sim
 }
 
-fn pointer(sim: &mut Sim<ExactBeatEmUp>, phase: PointerPhase, dx: f32, dy: f32) {
-    sim.input(InputEvent::Pointer {
-        id: 9,
-        phase,
-        x: 400.0 + dx,
-        y: 250.0 + dy,
-        dx,
-        dy,
-        buttons: if matches!(phase, PointerPhase::Down | PointerPhase::Move) {
-            1
-        } else {
-            0
-        },
-        at_ms: 0.0,
-        player: 0,
-    });
-}
-
-fn swipe(sim: &mut Sim<ExactBeatEmUp>, dx: f32, dy: f32) {
-    pointer(sim, PointerPhase::Down, 0.0, 0.0);
-    pointer(sim, PointerPhase::Move, dx, dy);
-    pointer(sim, PointerPhase::Up, 0.0, 0.0);
-    sim.run(8.334);
-}
-
-#[test]
-fn starts_close_and_low_and_swiping_changes_movement_frame() {
+fn start_on(viewport: Vec2) -> Game {
     let mut sim = start();
-    let player = sim.global_position("player").unwrap();
-    let offset = sim.local_position("camera").unwrap() - player;
-    assert!((0.8..1.5).contains(&offset.y), "{offset}");
-    assert!((4.0..5.0).contains(&offset.z), "{offset}");
-    swipe(&mut sim, std::f32::consts::FRAC_PI_2 / 0.004, 0.0);
-    assert!(sim.local_position("camera").unwrap().x < player.x - 4.0);
-    let before = sim.global_position("player").unwrap();
-    sim.hold("KeyW", 250.0);
-    let walked = sim.global_position("player").unwrap() - before;
-    assert!(walked.x > 0.5 && walked.z.abs() < 0.01, "{walked}");
+    sim.viewport(viewport.x, viewport.y);
+    sim.run(TICK_MS);
+    sim
 }
 
-#[test]
-fn hover_and_action_controls_do_not_orbit_but_a_second_finger_can() {
-    let mut sim = start();
-    sim.input(InputEvent::Pointer {
-        id: 9,
-        phase: PointerPhase::Move,
-        x: 100.0,
-        y: 100.0,
-        dx: 90.0,
-        dy: 20.0,
-        buttons: 0,
-        at_ms: 0.0,
-        player: 0,
-    });
-    sim.run(8.334);
-    assert_eq!(sim.world().resource::<Orbit>().yaw, 0.0);
-    for (phase, x) in [(PointerPhase::Down, 40.0), (PointerPhase::Move, 80.0)] {
-        sim.input(InputEvent::Control {
-            name: "move".into(),
-            id: 1,
-            phase,
-            x,
-            y: 40.0,
-            at_ms: 0.0,
-            player: 0,
-        });
-    }
-    sim.run(8.334);
-    let following = sim.world().resource::<Orbit>().yaw;
+fn eye(sim: &Game) -> Vec3 {
+    sim.get::<Transform>("camera").unwrap().position
+}
+
+fn feet(sim: &Game) -> Vec3 {
+    body::feet(sim.get::<Transform>("player").unwrap().position)
+}
+
+// Where a world point is on a canvas of `viewport` points, origin at the top left.
+#[track_caller]
+fn screen(sim: &Game, viewport: Vec2, point: Vec3) -> Vec2 {
+    let pose = *sim.get::<Transform>("camera").unwrap();
+    let lens = *sim.get::<Camera>("camera").unwrap();
     assert!(
-        following.abs() < 0.04,
-        "the stick only starts a smooth follow"
+        (point - pose.position).dot(pose.rotation * -Vec3::Z) > lens.near,
+        "{point} is behind the lens"
     );
-    swipe(&mut sim, 160.0, 0.0);
-    assert!((sim.world().resource::<Orbit>().yaw - following + 0.64).abs() < 0.001);
-    let yaw = sim.world().resource::<Orbit>().yaw;
-    pointer(&mut sim, PointerPhase::Down, 0.0, 0.0);
-    pointer(&mut sim, PointerPhase::Move, 200.0, 0.0);
-    pointer(&mut sim, PointerPhase::Cancel, 0.0, 0.0);
-    sim.run(8.334);
-    assert_eq!(sim.world().resource::<Orbit>().yaw, yaw);
-}
-
-#[test]
-fn tilt_is_bounded_and_the_lens_stays_in_front_of_walls() {
-    let mut sim = start();
-    swipe(&mut sim, 0.0, 10_000.0);
-    assert!(sim.world().resource::<Orbit>().elevation <= 0.95);
-    swipe(&mut sim, 0.0, -20_000.0);
-    assert!(sim.world().resource::<Orbit>().elevation >= -0.12);
-    assert!(sim.get::<Transform>("camera").unwrap().rotation.is_finite());
-
-    let mut sim = start();
-    sim.world_mut().spawn_named(
-        "camera-wall",
-        (
-            Transform::at(0.0, 2.0, 2.0),
-            Collider {
-                shape: Shape::Box {
-                    half: Vec3::new(4.0, 2.0, 0.2),
-                },
-                layer: park::SOLID,
-                ..Collider::default()
-            },
-        ),
-    );
-    sim.run(25.0);
-    let eye = sim.local_position("camera").unwrap();
-    assert!(eye.z > 0.5 && eye.z < 1.6, "{eye}");
-    assert!(physics::overlap(
-        sim.world(),
-        &Shape::Sphere { radius: 0.21 },
-        Transform::at(eye.x, eye.y, eye.z),
-        park::SOLID
+    let view = Mat4::from_rotation_translation(pose.rotation, pose.position).inverse();
+    let ndc = (lens.matrix(viewport) * view).project_point3(point);
+    Vec2::new(
+        (ndc.x + 1.0) * 0.5 * viewport.x,
+        (1.0 - ndc.y) * 0.5 * viewport.y,
     )
-    .is_empty());
+}
+
+// The standing body's box on the canvas: [left, top, right, bottom] in points.
+#[track_caller]
+fn runner(sim: &Game, viewport: Vec2) -> [f32; 4] {
+    let right = sim.get::<Transform>("camera").unwrap().rotation * Vec3::X;
+    let feet = feet(sim);
+    let corners = [feet, feet + Vec3::Y * HEIGHT]
+        .into_iter()
+        .flat_map(|at| [at - right * RADIUS, at + right * RADIUS])
+        .map(|at| screen(sim, viewport, at));
+    corners.fold(
+        [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+        |[left, top, right, bottom], at| {
+            [
+                left.min(at.x),
+                top.min(at.y),
+                right.max(at.x),
+                bottom.max(at.y),
+            ]
+        },
+    )
+}
+
+// The move pad and the action buttons of `app.contract` on a coarse pointer with
+// no safe-area inset: [left, top, right, bottom] in points.
+fn controls(viewport: Vec2) -> [[f32; 4]; 2] {
+    let (w, h) = (viewport.x, viewport.y);
+    let pad = [24.0, h - 136.0, 136.0, h - 24.0];
+    let buttons = if w < 600.0 {
+        [w - 120.0, h - 304.0, w - 24.0, h - 24.0]
+    } else {
+        [w - 212.0, h - 196.0, w - 24.0, h - 24.0]
+    };
+    [pad, buttons]
 }
 
 #[test]
-fn shake_is_subtle_and_a_save_resumes_the_same_camera() {
-    let mut sim = start();
-    let before = sim.local_position("camera").unwrap();
-    sim.run(120.0);
-    let moved = sim.local_position("camera").unwrap().distance(before);
-    assert!(moved > 0.0001 && moved < 0.02, "idle sway: {moved}");
-    swipe(&mut sim, 180.0, 45.0);
-    sim.hold("KeyW", 150.0);
-    let saved = sim.save().unwrap();
-    let mut restored = start();
-    restored.restore(&saved).unwrap();
-    for game in [&mut sim, &mut restored] {
-        game.hold("KeyD", 200.0);
+fn the_runner_stands_whole_and_left_of_the_screen_centre() {
+    for viewport in [LANDSCAPE, PORTRAIT] {
+        let sim = start_on(viewport);
+        let [left, top, right, bottom] = runner(&sim, viewport);
+        assert!(
+            right < viewport.x / 2.0,
+            "{viewport}: the centre looks at the body, which ends at x {right}"
+        );
+        assert!(
+            left > 0.0 && top > 0.0 && bottom < viewport.y,
+            "{viewport}: the body is cut off: {left} {top} {bottom}"
+        );
     }
-    assert_eq!(
-        sim.local_position("camera"),
-        restored.local_position("camera")
-    );
-    assert_eq!(sim.world().hash(), restored.world().hash());
 }
 
 #[test]
-fn camera_follows_every_travel_direction_without_bending_a_held_input() {
-    for (key, direction) in [
-        ("KeyW", -Vec3::Z),
-        ("KeyS", Vec3::Z),
-        ("KeyA", -Vec3::X),
-        ("KeyD", Vec3::X),
-    ] {
-        let mut sim = start();
-        let before = sim.global_position("player").unwrap();
-        sim.key_down(key);
-        let mut previous = sim.world().resource::<Orbit>().yaw;
-        for _ in 0..168 {
-            sim.run(8.334);
-            let yaw = sim.world().resource::<Orbit>().yaw;
+fn the_runner_is_clear_of_the_touch_controls() {
+    for viewport in [LANDSCAPE, PORTRAIT] {
+        let sim = start_on(viewport);
+        let [left, top, right, bottom] = runner(&sim, viewport);
+        for [l, t, r, b] in controls(viewport) {
             assert!(
-                math::wrap_angle(yaw - previous).abs() < 0.033,
-                "{key}: camera snapped"
+                right < l || left > r || bottom < t || top > b,
+                "{viewport}: the body [{left} {top} {right} {bottom}] is under a control [{l} {t} {r} {b}]"
             );
-            previous = yaw;
         }
-        let walked = sim.global_position("player").unwrap() - before;
-        let planar = walked * Vec3::new(1.0, 0.0, 1.0);
-        assert!(planar.dot(direction) > 3.0, "{key}: {planar}");
+    }
+}
+
+#[test]
+fn the_runner_is_larger_and_the_eye_lower_than_under_the_old_orbit() {
+    // The orbit this camera replaced: 4.8 m from the body, 64 degrees of vertical
+    // field of view, the eye 2.11 m above the feet.
+    let old_share = HEIGHT / (2.0 * 4.8 * 32.0f32.to_radians().tan());
+    for viewport in [LANDSCAPE, PORTRAIT] {
+        let sim = start_on(viewport);
+        let [_, top, _, bottom] = runner(&sim, viewport);
+        let share = (bottom - top) / viewport.y;
+        assert!(share > old_share, "{viewport}: {share} of the height");
+        let above = eye(&sim).y - feet(&sim).y;
         assert!(
-            planar.cross(direction).length() < 0.01,
-            "{key}: curved path {planar}"
-        );
-        let forward = Quat::from_rotation_y(previous) * -Vec3::Z;
-        assert!(
-            forward.dot(direction) > 0.99,
-            "{key}: camera forward {forward}"
-        );
-        sim.key_up(key);
-        sim.run(500.0);
-        assert_eq!(
-            sim.world().resource::<Orbit>().yaw,
-            previous,
-            "idle view stays put"
+            above > HEIGHT / 2.0 && above < HEIGHT,
+            "{viewport}: the eye is {above} m above the feet"
         );
     }
 }
 
 #[test]
-fn manual_look_has_priority_then_follow_resumes_while_moving() {
+fn a_rotated_phone_reframes_without_a_jump() {
+    let mut sim = start_on(LANDSCAPE);
+    sim.viewport(PORTRAIT.x, PORTRAIT.y);
+    let mut before = eye(&sim);
+    for _ in 0..360 {
+        sim.run(TICK_MS);
+        let now = eye(&sim);
+        assert!(now.distance(before) < 0.05, "the eye jumped {before} to {now}");
+        before = now;
+    }
+    let view = camera::view(sim.world());
+    assert!((view.boom - tune::PORTRAIT.boom).abs() < 0.01, "{view:?}");
+    assert!((view.fov - tune::PORTRAIT.fov).abs() < 0.1, "{view:?}");
+}
+
+#[test]
+fn an_unknown_viewport_is_landscape_and_the_first_report_places_the_framing() {
+    #[track_caller]
+    fn assert_framed(sim: &Game, framing: camera::Framing) {
+        let view = camera::view(sim.world());
+        assert_eq!(
+            (view.boom, view.shoulder, view.elevation, view.fov),
+            (framing.boom, framing.shoulder, framing.elevation, framing.fov)
+        );
+    }
     let mut sim = start();
-    sim.key_down("KeyD");
-    sim.run(450.0);
-    pointer(&mut sim, PointerPhase::Down, 0.0, 0.0);
-    pointer(&mut sim, PointerPhase::Move, 120.0, 0.0);
-    sim.run(8.334);
-    let manual = sim.world().resource::<Orbit>().yaw;
-    sim.run(1000.0);
-    assert_eq!(
-        sim.world().resource::<Orbit>().yaw,
-        manual,
-        "a held finger owns the view"
-    );
-    pointer(&mut sim, PointerPhase::Up, 0.0, 0.0);
-    sim.run(500.0);
-    assert_eq!(
-        sim.world().resource::<Orbit>().yaw,
-        manual,
-        "release has a grace period"
-    );
-    let from = sim.global_position("player").unwrap();
-    sim.run(1400.0);
-    let travel = (sim.global_position("player").unwrap() - from) * Vec3::new(1.0, 0.0, 1.0);
-    let forward = Quat::from_rotation_y(sim.world().resource::<Orbit>().yaw) * -Vec3::Z;
-    assert!(
-        forward.dot(travel.normalize()) > 0.99,
-        "follow resumed behind travel"
-    );
+    assert_framed(&sim, tune::LANDSCAPE);
+    sim.viewport(PORTRAIT.x, PORTRAIT.y);
+    sim.run(TICK_MS);
+    assert_framed(&sim, tune::PORTRAIT);
 }

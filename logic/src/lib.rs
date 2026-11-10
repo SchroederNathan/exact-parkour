@@ -94,7 +94,7 @@ impl Game for ExactBeatEmUp {
 
     fn register(w: &mut World, _: &std::collections::BTreeMap<&str, Value>) {
         arena::register(w);
-        w.register_resource::<camera::Orbit>();
+        camera::register(w);
         w.register_resource::<TouchStick>();
     }
 

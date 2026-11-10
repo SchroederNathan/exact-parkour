@@ -4,7 +4,8 @@
 //!
 //! - `goto <x> <y> <z> <yaw degrees>`: stand the body with its feet there, facing
 //!   that way; zero faces south (+Z).
-//! - `camera <x> <y> <z>`: put the camera that far from the body.
+//! - `camera <x> <y> <z>`: hold the camera that far from the body's centre, looking
+//!   at it. `camera 0 0 0` gives it back to the rig.
 //! - `roller <kind> <speed>`: send roller `kind` at the body from behind its back.
 use crate::body::{self, Parkour};
 use crate::park;

@@ -66,7 +66,7 @@ fn steer(game: &mut Game, dir: Vec3) {
     };
     game.input(event(PointerPhase::Up, 100.0, 100.0));
     if dir != Vec3::ZERO {
-        let yaw = game.world().resource::<exact_beat_em_up_logic::camera::Orbit>().yaw;
+        let yaw = exact_beat_em_up_logic::camera::view(game.world()).yaw;
         let d = exact_game::Quat::from_rotation_y(-yaw) * dir.normalize() * 60.0;
         game.input(event(PointerPhase::Down, 100.0, 100.0));
         game.input(event(PointerPhase::Move, 100.0 + d.x, 100.0 + d.z));
