@@ -2,6 +2,7 @@ use exact_game::*;
 use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
 pub mod body;
+pub mod arena;
 pub mod debug;
 pub mod gait;
 pub mod hold;
@@ -42,6 +43,10 @@ impl Game for ExactBeatEmUp {
             .button("jump", &["Space", "GamepadSouth"])
             .button("sprint", &["ShiftLeft", "ShiftRight", "GamepadL3", "GamepadR1"])
             .button("slide", &["KeyC", "ControlLeft", "GamepadEast"])
+    }
+
+    fn register(w: &mut World, _: &std::collections::BTreeMap<&str, Value>) {
+        arena::register(w);
     }
 
     fn setup(w: &mut World, args: &Options) {
@@ -128,6 +133,7 @@ impl Game for ExactBeatEmUp {
                 Player,
             ),
         );
+        arena::setup(w, player);
         w.spawn_named(
             "stickman",
             (
@@ -169,6 +175,7 @@ impl Game for ExactBeatEmUp {
 
     fn tick(w: &mut World, input: &Input, _: &Options) {
         debug::commands(w, input);
+        arena::tick(w);
         park::tick(w);
         let motion = body::step(w, input);
         physics::step(w);

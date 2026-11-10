@@ -3,6 +3,12 @@ shape Viewport
   width: number
   height: number
 
+shape Hud
+  round: number
+  enemies: number
+  hits: number
+  phase: string
+
 component ExactBeatEmUp
   state playing = false
   state paused = false
@@ -12,6 +18,7 @@ component ExactBeatEmUp
   state lent = false
   state arrived = ""
   resource viewport = exactViewport() as shape Viewport
+  resource hud = exactSurface("world") as shape Hud
   derive touch = viewport.pointer == "coarse"
   derive narrow = viewport.width < 600
   derive sprintRight = narrow ? "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 30px)" : "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 128px)"
@@ -82,10 +89,14 @@ component ExactBeatEmUp
             text "Slide"
           button buttonStyle=(under == "jump" ? "prominent-glass" : "glass") testId="jump-face" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 pointer-events="none" aria-hidden=true
             text "Jump"
+        column testId="combat-hud" position="absolute" top="calc(env(safe-area-inset-top) + 16px)" left="calc(env(safe-area-inset-left) + 20px)" gap=6 pointer-events="none"
+          text `ROUND ${hud.round}` font-size=18 font-weight=700 letter-spacing=1 color="#f6d365" aria-live="polite"
+          text `HOSTILES ${hud.enemies}` font-size=14 color="#ffffff" font-variant-numeric="tabular-nums"
+          text `DAMAGE ${hud.hits} / 3` font-size=14 color=(hud.hits >= 2 ? "#ff7b7b" : "#c7d8e5") font-variant-numeric="tabular-nums"
       else
         column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=24
-          text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
-          text "An obstacle park for a future beat 'em up." max-width=360 text-align="center" color="#b8c8ce"
-          text "Move with WASD or the arrow keys. Hold Shift to sprint. Space jumps. C slides." max-width=360 text-align="center" color="#b8c8ce"
+          text "ROOFTOP HOLDOUT" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
+          text "Dual pistols. Escalating hordes. Keep moving." max-width=360 text-align="center" color="#b8c8ce"
+          text "Move with WASD or the arrow keys. Your pistols raise and auto-target the nearest hostile." max-width=360 text-align="center" color="#b8c8ce"
           button buttonStyle="filled" press=play autofocus aria-label="Play" testId="play"
             text "Play"
