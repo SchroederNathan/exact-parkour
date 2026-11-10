@@ -696,8 +696,8 @@ fn vault(rig: &Rig) -> Clip {
                 at: 0.5,
                 drop: 0.0,
                 joints: &[
-                    ("hips", [0.25, 0.15, -1.1]),
-                    ("spine", [0.15, 0.1, -0.15]),
+                    ("hips", [0.25, 0.15, -1.02]),
+                    ("spine", [0.15, 0.1, -0.1]),
                     ("neck", [-0.3, -0.15, 0.7]),
                     ("upper_arm_l", [0.0, 0.0, 0.5]),
                     ("forearm_l", [-0.1, 0.0, 0.0]),
@@ -728,8 +728,8 @@ fn vault(rig: &Rig) -> Clip {
                     ("shin_r", [0.55, 0.0, 0.0]),
                 ],
             },
-            // Down on the lead leg, which gives, the other knee coming through for the
-            // next stride and the arms opposite the legs.
+            // Into the run's stride as the left foot strikes, the hips a little
+            // low, the arms opposite the legs.
             Key {
                 at: 1.0,
                 drop: 0.09,
@@ -739,10 +739,10 @@ fn vault(rig: &Rig) -> Clip {
                     ("forearm_l", [-0.9, 0.0, 0.0]),
                     ("upper_arm_r", [0.4, 0.0, -0.15]),
                     ("forearm_r", [-0.9, 0.0, 0.0]),
-                    ("thigh_l", [-0.5, 0.0, 0.0]),
-                    ("shin_l", [1.3, 0.0, 0.0]),
-                    ("thigh_r", [-0.3, 0.0, 0.0]),
-                    ("shin_r", [0.7, 0.0, 0.0]),
+                    ("thigh_l", [-0.55, 0.0, 0.0]),
+                    ("shin_l", [0.45, 0.0, 0.0]),
+                    ("thigh_r", [0.15, 0.0, 0.0]),
+                    ("shin_r", [1.0, 0.0, 0.0]),
                 ],
             },
         ],
@@ -768,15 +768,15 @@ fn slide(rig: &Rig) -> Clip {
                     ("forearm_l", [-0.6, 0.0, 0.0]),
                     ("upper_arm_r", [-0.6, 0.0, -0.2]),
                     ("forearm_r", [-0.9, 0.0, 0.0]),
-                    ("thigh_l", [-0.7, 0.0, 0.0]),
-                    ("shin_l", [0.3, 0.0, 0.0]),
+                    ("thigh_l", [-0.35, 0.0, 0.0]),
+                    ("shin_l", [1.1, 0.0, 0.0]),
                     ("thigh_r", [0.2, 0.0, 0.0]),
                     ("shin_r", [0.9, 0.0, 0.0]),
                 ],
             },
             // The kick: the lead leg goes out long while the hips are still high.
             Key {
-                at: 0.1,
+                at: 0.18,
                 drop: 0.2,
                 joints: &[
                     ("hips", [-0.25, 0.0, -0.08]),
@@ -829,7 +829,7 @@ fn slide(rig: &Rig) -> Clip {
             },
             Key {
                 at: 0.76,
-                drop: 0.62,
+                drop: 0.52,
                 joints: &[
                     ("hips", [-0.6, 0.0, -0.2]),
                     ("spine", [0.45, 0.05, 0.05]),
@@ -847,7 +847,7 @@ fn slide(rig: &Rig) -> Clip {
             // Up: the chest goes forward over the tucked foot before the hips rise.
             Key {
                 at: 0.88,
-                drop: 0.4,
+                drop: 0.28,
                 joints: &[
                     ("hips", [0.15, 0.0, -0.05]),
                     ("spine", [0.5, 0.0, 0.0]),
@@ -856,8 +856,8 @@ fn slide(rig: &Rig) -> Clip {
                     ("forearm_l", [-0.8, 0.0, 0.0]),
                     ("upper_arm_r", [-0.8, 0.0, -0.3]),
                     ("forearm_r", [-1.3, 0.0, 0.0]),
-                    ("thigh_l", [-0.9, 0.0, 0.0]),
-                    ("shin_l", [1.1, 0.0, 0.0]),
+                    ("thigh_l", [-1.1, 0.0, 0.0]),
+                    ("shin_l", [0.35, 0.0, 0.0]),
                     ("thigh_r", [-1.2, 0.0, -0.05]),
                     ("shin_r", [1.9, 0.0, 0.0]),
                 ],
@@ -975,19 +975,21 @@ fn crouch(rig: &Rig) -> Clip {
 
 // A forward roll over the right shoulder: the hands go down first and take the
 // ground, the head tucks under, the body curls into a ball that turns once about
-// its middle, 0.45 m above the ground, and uncurls onto its feet, the left leg
-// a moment before the right.
+// its middle and uncurls onto its feet, the left leg a moment before the right.
 fn roll(rig: &Rig) -> Clip {
     let times: Vec<f32> = (0..=40).map(|i| i as f32 / 40.0).collect();
     // How tightly the body is curled, and how far it has turned.
-    let curl = |u: f32| smooth(u / 0.2) * (1.0 - smooth((u - 0.78) / 0.22));
-    let spin = |u: f32| std::f32::consts::TAU * smooth((u - 0.08) / 0.8);
+    // The turn is done before the legs open, and they open slowly.
+    let curl = |u: f32| smooth(u / 0.2) * (1.0 - smooth((u - 0.6) / 0.4));
+    let spin = |u: f32| std::f32::consts::TAU * smooth((u - 0.06) / 0.62);
     // The arms reach for the ground before the body is a ball.
     let reach = |u: f32| smooth(u / 0.08) * (1.0 - smooth((u - 0.14) / 0.16));
     let rest = rig.bones()[node(rig, "hips") as usize].head;
-    // The hips ride the rim of the ball: its middle is in front of the belly.
+    // The hips ride the rim of the ball: its middle is in front of the belly, and
+    // lower while the body is upside down, when it rolls on its back.
     let hips_at = move |u: f32| {
-        let ball = Vec3::new(0.0, 0.45, 0.0);
+        let over = math::sin(0.5 * spin(u));
+        let ball = Vec3::new(0.0, 0.45 - 0.22 * over * over, 0.0);
         let rim = Quat::from_rotation_x(spin(u)) * Vec3::new(0.0, 0.25, 0.2);
         rest.lerp(ball - rim, curl(u))
     };
@@ -1098,7 +1100,7 @@ pub fn animator() -> Animator {
             Act::Climb => State::clip(name, "climb").speed(0.0).fade(0.1),
             Act::Roll => State::clip(name, "roll").speed(0.0).fade(0.1),
             Act::Land => State::clip(name, "crouch").speed(0.0).fade(0.05),
-            Act::Slide => State::clip(name, "slide").speed(0.0).fade(0.08),
+            Act::Slide => State::clip(name, "slide").speed(0.0).fade(0.12),
             Act::Rise => State::blend(
                 name,
                 Blend::across([(0.0, "rise-prone"), (1.0, "rise-supine")]).parameter("supine"),

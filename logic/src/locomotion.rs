@@ -176,12 +176,21 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
         // The legs unlock as the ground comes up.
         let mut layers = w.require_mut::<Layers>(target);
         let brace = &mut layers.0[BRACE_LAYER];
-        let weight = if motion.brace > 0.0 { 1.0 } else { 0.0 };
+        // It lets go over a moment, while the landing takes the bend over.
+        let weight = if motion.brace > 0.0 {
+            1.0
+        } else {
+            (brace.weight - dt / 0.08).max(0.0)
+        };
         if brace.weight != weight {
             brace.weight = weight;
         }
-        if motion.brace > 0.0 {
-            brace.animation.time = motion.brace.min(1.0);
+        if brace.weight > 0.0 {
+            brace.animation.time = if motion.brace > 0.0 {
+                motion.brace.min(1.0)
+            } else {
+                brace.animation.time - dt
+            };
         }
     }
     if motion.kneel > 0.0 {
