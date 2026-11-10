@@ -1,6 +1,20 @@
 # Rooftop Rumble
 
-Rooftop Rumble is a small Exact game prototype. An articulated wooden mannequin runs, vaults, climbs, rolls and falls through an obstacle park. The player and every object share one Rapier physics world with real gravity.
+Rooftop Rumble is a small Exact game prototype. An articulated wooden mannequin runs, vaults, climbs, slides, rolls and falls. It races across the roofs of a city, holds a rooftop against hordes, or trains in an obstacle park. The player and every object share one Rapier physics world with real gravity.
+
+## Races
+
+A race is a run across the roofs of a city block, from the start through the checkpoints to the finish gate. The street is far below. A column of light stands over the next checkpoint. A runner who falls off the roofs starts again at the last checkpoint, and the clock keeps running. The top bar shows the clock and the checkpoints reached.
+
+| Race | The block | The route |
+|---|---|---|
+| Skyline Sprint | A downtown office district, 36 m to 29 m high | The level that teaches: a vault, an alley, a slide gate, four roofs of sprint jumps, a pipe bridge over an avenue, a drop into a roll, one climb, and a stair to a helipad. A catwalk is the fast line |
+| Switchback Run | An old town block of 72 by 60 m: three rows of houses, narrow alleys and a courtyard with a clock tower | Four legs that fold back on each other: a fire escape of three climbs, a beam over the route's own path, a corridor of slide, vault, slide, an edge crossed by the hands, planks over a light well, terraces that step down, and the steps round the clock tower. A 6 m sprint jump is the shortcut |
+| Helix Heights | A tower under construction and the buildings around it, 18 m to 49.5 m high | One turn up and around the tower: ramps, a ledge crossed by the hands, floor slabs, scaffolds with slide gates, a plank bridge, a crane, and a last jump from the jib onto the tower |
+
+The levels have no textures. A colour has one meaning: orange is a wall to vault, teal is a wall or an edge to climb, yellow is a beam to run along, sand is a ramp or a stair, and red is a bar to slide under. A slide passes under a red bar; a run does not.
+
+`docs/race-level-design.md` is the handbook for a new level: the kit, the table of what the runner can jump, the rules, and the commands that draw a level and prove it.
 
 ## Controls
 
@@ -41,14 +55,14 @@ A hanging body stays on the edge until the stick stops pushing at the wall. Afte
 | Stick | Result |
 |---|---|
 | Along the wall | Shimmy that way, hand over hand, as far as the edge goes. At the end of the edge the body leans out past it on one hand |
-| Toward the wall, or Jump with no aim | Climb onto the top |
+| Toward the wall, or Jump with no aim | Climb onto the top. Where the top has no room to stand, the body stays on the edge |
 | Away from the wall | Let go |
 | Along the wall, and Jump | Leap that way and up, and catch the next edge on the wall if there is one |
 | Away from the wall, and Jump | Jump off the wall, backward |
 
 A body stands on its feet: with no ground within a foot's width under it, it slips off the edge it is past.
 
-A slide starts from 2.5 m/s or more. It lasts 0.8 s, keeps 85 percent of the speed, steers a little, and ends in a run. Jump cuts it short.
+A slide starts from 2.5 m/s or more. It lasts 0.8 s, keeps 85 percent of the speed, steers a little, and ends in a run. Jump cuts it short. A slide goes under a bar whose underside is 1.05 m up, which stops a body on its feet. Under the bar the slide stays low and goes on until the body is clear.
 
 Landings depend on the downward speed at touchdown, and each is deeper the harder it is.
 
@@ -75,23 +89,30 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 - `logic/src/ledge.rs`: finds the top edge of a wall with the physics queries. The vault, the climb, the grab and the shimmy all use it.
 - `logic/src/hold.rs`: what the hands and feet hold. A move names the points on the wall, and after the Animator has posed the body the engine's two-bone solver puts each wrist and ankle on its point. A limb holds only what it can reach, and goes nowhere in one tick.
 - `logic/src/park.rs`: the park as one table of blocks, and the ramp's rollers.
+- `logic/src/race/mod.rs`: a race in play: the checkpoints, the fall line, the finish and the HUD record.
+- `logic/src/race/kit.rs`: what a level is made of: buildings, walls, decks, ramps, stairs, slide gates and checkpoints.
+- `logic/src/race/skyline.rs`, `switchback.rs`, `helix.rs`: the three levels. Each starts with its beat sheet.
+- `logic/src/race/city.rs`: the far city around a level, made from the level's bounds.
 - `logic/src/ragdoll.rs`: fifteen points held together by constraints. The engine's physics has no joints, so the ragdoll is solved here and collides through the physics queries.
 - `logic/src/rise.rs`: the two get-ups. Each is a list of stages that place the hips, wrists and ankles; the engine's two-bone solver turns the limbs to reach them, so a planted hand or foot does not move.
 - `logic/src/gait.rs`, `logic/src/locomotion.rs`: the gait clips and the clock that keeps planted feet still.
 - `logic/src/stickman.rs`: the skeleton, the other clips and the Animator, which has one state per action.
 - `logic/src/mannequin.rs`: the shaped mannequin mesh: rounded chest and pelvis, tapered limbs, ball joints, hands and feet. It keeps the existing skeleton and hand sockets; rigid limb weights retain the carved shapes while the torso blends across the spine.
-- `logic/src/debug.rs`: `goto`, `camera` and `roller` messages for setting up a scene from an agent.
+- `logic/src/debug.rs`: `goto`, `camera`, `roller` and `checkpoint` messages for setting up a scene from an agent.
 - `app.contract`: the title screen and the touch controls.
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 80 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 98 hostless tests and the determinism lints.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
 - `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
+- `logic/tests/run_skyline.rs`, `run_switchback.rs`, `run_helix.rs`: a scripted runner plays each race from the start to the finish with no fall. It pushes the stick and presses Jump and Slide, as a player does. Each level also finishes with every press early and late.
+- `logic/tests/envelope.rs`: the gaps the runner crosses, a slide gate that stops a run and passes a slide, and a course with every piece of the kit. The ignored `envelope` test prints the table of jumps.
+- `logic/tests/race.rs`: each checkpoint and each finish is a place to stand.
 
 To see one move tick by tick, run the ignored `trace` test. It prints where the hips, shoulders and holds are and which bone, if any, is in the wall:
 

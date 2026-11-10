@@ -216,7 +216,7 @@ impl Level {
     /// A straight slab from `from` to `to`, `width` wide and `thick` deep, whose
     /// top face holds both points on its centre line. With the two heights equal
     /// it is a plank at any angle on the map; otherwise it is a ramp. A body walks
-    /// a slope up to 50 degrees.
+    /// a slope up to 50 degrees, and sprints at full speed up 12 degrees or less.
     pub fn ramp(
         &mut self,
         name: &str,
@@ -241,9 +241,9 @@ impl Level {
 
     /// A stair from `from` to `to`, `width` wide. `from` and `to` are the middles
     /// of its two ends, at the heights of the surfaces it joins. The steps are
-    /// drawn only: the body runs on an unseen ramp over their edges, at full
-    /// speed, because a real step stops the capsule for a moment. Give it a run
-    /// of at least twice its rise.
+    /// drawn only: the body runs on an unseen ramp over their edges, because a
+    /// real step stops the capsule for a moment. A slope slows a sprint: give a
+    /// stair that must keep the speed a run of 4.5 times its rise.
     pub fn stairs(&mut self, name: &str, from: [f32; 3], to: [f32; 3], width: f32, look: Look) {
         let ramp = self.ramp(&format!("{name}-ramp"), from, to, width, 0.3, look);
         ramp.kind = Kind::Unseen;

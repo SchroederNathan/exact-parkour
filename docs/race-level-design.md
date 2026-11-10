@@ -66,7 +66,9 @@ Other moves, from the README:
 - A wall on the runner's own surface, 0.35 to 1.15 m high and up to 1.2 m deep: Jump vaults it.
 - A wall up to 1.5 m high that is deeper: Jump climbs onto it.
 - A wall up to about 2.8 m high: Jump at it, the hands catch its edge, and the runner climbs. A wall of 3 m or more stops the runner.
-- A runner that hangs can move along the edge at 0.8 m/s, and can jump along it or off it.
+- A runner that hangs can move along the edge at 0.8 m/s, and can jump along it or off it. Where the top has no room to stand, a push at the wall does nothing: the runner stays on the edge and must move along it.
+- The table is for a jump from one roof to another. A wall of 2.2 to 2.8 m on the runner's own surface, or across a gap of up to about 2.5 m, is caught by the hands.
+- A checkpoint or the finish counts when the feet are within 2.2 m of it on the map and within 1.6 m of its height. Keep a later checkpoint further than that from an earlier part of the route.
 - A drop of up to 0.9 m needs no recovery. Up to 2 m the runner kneels and runs on. Up to about 3.5 m it rolls. A drop of 4 m or more throws the runner down, and it needs 3.5 s to get up.
 - A slide starts at 2.5 m/s or more. It covers about 2.5 m from a run and 4.6 m from a sprint. Under a bar the slide goes on until the runner is clear.
 - A slope up to 50 degrees is walked. A step up to 0.15 m is walked.
