@@ -1189,7 +1189,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
                 + Vec3::Y * (0.06 * math::sin(std::f32::consts::PI * closes));
             // The hips are over the top by then: the second knee comes
             // through in front, from where the leg hangs.
-            let (second, grip_2, flat_2, knee_2) = step(-climb.first, next, last, ahead, 0.2, 0.45);
+            let (second, grip_2, flat_2, knee_2) = step(-climb.first, next, last, ahead, 0.2, 0.3);
             let (one, two) = if climb.first > 0.0 {
                 (Limb::FootL, Limb::FootR)
             } else {

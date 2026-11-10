@@ -203,7 +203,9 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
     } else if motion.impact > 0.0 && motion.act == Act::Move {
         let mut layers = w.require_mut::<Layers>(target);
         let land = &mut layers.0[LAND_LAYER];
-        land.weight = (motion.impact / crate::body::SOFT).clamp(0.3, 1.0);
+        // The leading leg is already down and a little bent when it lands, so
+        // the knees give less than they would from straight.
+        land.weight = 0.7 * (motion.impact / crate::body::SOFT).clamp(0.3, 1.0);
         land.animation.time = 0.0;
     }
 }
