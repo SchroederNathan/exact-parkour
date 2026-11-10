@@ -955,7 +955,9 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
         };
         return (Action::Climb(climb), climb.motion(), face);
     }
-    if away || (up && !ledge.standable) {
+    // With no room to stand on top, a push at the wall does nothing: the body
+    // stays on the edge, and goes along it to where there is room.
+    if away {
         body.buffer = 0.0;
         body.regrab = REGRAB;
         body.airtime = COYOTE;
