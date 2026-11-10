@@ -33,6 +33,10 @@ impl Ledge {
     pub fn inward(&self) -> Vec3 {
         -self.out
     }
+    /// Unit vector along the edge, to the left of a body that faces the wall.
+    pub fn left(&self) -> Vec3 {
+        Vec3::Y.cross(self.inward())
+    }
     /// The capsule centre of a body that stands on the top just behind the edge.
     pub fn stand(&self) -> Vec3 {
         self.edge + self.inward() * (RADIUS + 0.15) + Vec3::Y * (HALF + 0.02)
@@ -43,8 +47,17 @@ impl Ledge {
     }
 }
 
-/// How far the hands of a hanging body are above its feet, metres.
-pub const HANG_REACH: f32 = 2.05;
+/// How far the edge is above the feet of a body that hangs from it, metres: the
+/// shoulders are 1.44 m up, and the arms are a little short of straight.
+pub const HANG_REACH: f32 = 1.88;
+
+/// The same edge `side` metres to the left of where `ledge` meets it, for a body
+/// that hangs from it. `None` where the edge ends, turns or changes height.
+pub fn along(w: &World, ledge: &Ledge, side: f32) -> Option<Ledge> {
+    let centre = ledge.hang() + ledge.left() * side;
+    probe(w, centre, ledge.inward(), 0.3, HANG_REACH - 0.08, HANG_REACH + 0.08)
+        .filter(|next| next.out.dot(ledge.out) > 0.95 && (next.edge.y - ledge.edge.y).abs() < 0.05)
+}
 
 /// Look from a capsule centred at `centre` along the horizontal unit vector `dir`
 /// for a wall within `reach` metres of the capsule's surface whose top is between

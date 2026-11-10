@@ -385,8 +385,9 @@ fn hang(rig: &Rig) -> Clip {
     keyed(rig, "hang", 1.0, &[key(0.0), key(1.0)])
 }
 
-// From the hang: pull the chest to the edge, press down on it, bring a knee up
-// onto the top, and stand.
+// From the hang: pull up until the hips are at the edge, lean the chest in over
+// the top, and stand up on it. The holds put the hands on the edge and step the
+// feet onto the top; these keys are the trunk, and the limbs between holds.
 fn climb(rig: &Rig) -> Clip {
     keyed(
         rig,
@@ -406,44 +407,62 @@ fn climb(rig: &Rig) -> Clip {
                     ("upper_arm_r", [-2.3, 0.0, -0.3]),
                     ("forearm_l", [-1.7, 0.0, 0.0]),
                     ("forearm_r", [-1.7, 0.0, 0.0]),
-                    ("thigh_l", [-0.5, 0.0, 0.0]),
-                    ("thigh_r", [-0.2, 0.0, 0.0]),
+                    ("thigh_l", [-0.25, 0.0, 0.0]),
+                    ("thigh_r", [-0.35, 0.0, 0.0]),
+                    ("shin_l", [0.7, 0.0, 0.0]),
+                    ("shin_r", [0.8, 0.0, 0.0]),
+                    ("spine", [0.1, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.5,
+                drop: 0.0,
+                joints: &[
+                    ("upper_arm_l", [0.3, 0.0, 0.25]),
+                    ("upper_arm_r", [0.3, 0.0, -0.25]),
+                    ("forearm_l", [-0.4, 0.0, 0.0]),
+                    ("forearm_r", [-0.4, 0.0, 0.0]),
+                    ("thigh_l", [-0.15, 0.0, 0.0]),
+                    ("shin_l", [0.4, 0.0, 0.0]),
+                    ("thigh_r", [-0.6, 0.0, -0.5]),
+                    ("shin_r", [1.2, 0.0, 0.0]),
+                    // Folded over the edge, the shoulders low enough to press on it.
+                    ("hips", [0.4, 0.0, 0.0]),
+                    ("spine", [0.5, 0.0, 0.0]),
+                    ("neck", [-0.6, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.7,
+                drop: 0.2,
+                joints: &[
+                    ("upper_arm_l", [-0.5, 0.0, 0.2]),
+                    ("upper_arm_r", [-0.5, 0.0, -0.2]),
+                    ("forearm_l", [-0.7, 0.0, 0.0]),
+                    ("forearm_r", [-0.7, 0.0, 0.0]),
+                    ("thigh_l", [-0.2, 0.0, 0.0]),
                     ("shin_l", [0.9, 0.0, 0.0]),
-                    ("shin_r", [0.6, 0.0, 0.0]),
-                    ("spine", [0.15, 0.0, 0.0]),
+                    ("thigh_r", [-1.2, 0.0, 0.0]),
+                    ("shin_r", [1.6, 0.0, 0.0]),
+                    ("hips", [0.2, 0.0, 0.0]),
+                    ("spine", [0.5, 0.0, 0.0]),
+                    ("neck", [-0.5, 0.0, 0.0]),
                 ],
             },
             Key {
-                at: 0.6,
-                drop: 0.1,
+                at: 0.85,
+                drop: 0.25,
                 joints: &[
-                    ("upper_arm_l", [0.5, 0.0, 0.25]),
-                    ("upper_arm_r", [0.5, 0.0, -0.25]),
-                    ("forearm_l", [-1.5, 0.0, 0.0]),
-                    ("forearm_r", [-1.5, 0.0, 0.0]),
-                    ("thigh_l", [-0.3, 0.0, 0.0]),
-                    ("thigh_r", [-1.9, 0.0, 0.0]),
-                    ("shin_l", [0.5, 0.0, 0.0]),
-                    ("shin_r", [1.9, 0.0, 0.0]),
-                    ("spine", [0.7, 0.0, 0.0]),
-                    ("neck", [-0.4, 0.0, 0.0]),
-                ],
-            },
-            Key {
-                at: 0.82,
-                drop: 0.42,
-                joints: &[
-                    ("upper_arm_l", [-0.7, 0.0, 0.1]),
-                    ("upper_arm_r", [-0.7, 0.0, -0.1]),
-                    ("forearm_l", [-0.6, 0.0, 0.0]),
-                    ("forearm_r", [-0.6, 0.0, 0.0]),
-                    ("thigh_l", [-1.0, 0.0, 0.0]),
-                    ("thigh_r", [-1.0, 0.0, 0.0]),
-                    ("shin_l", [2.0, 0.0, 0.0]),
-                    ("shin_r", [2.0, 0.0, 0.0]),
-                    ("foot_l", [-1.0, 0.0, 0.0]),
-                    ("foot_r", [-1.0, 0.0, 0.0]),
-                    ("spine", [0.55, 0.0, 0.0]),
+                    ("upper_arm_l", [-0.3, 0.0, 0.1]),
+                    ("upper_arm_r", [-0.3, 0.0, -0.1]),
+                    ("forearm_l", [-0.5, 0.0, 0.0]),
+                    ("forearm_r", [-0.5, 0.0, 0.0]),
+                    ("thigh_l", [-0.8, 0.0, 0.0]),
+                    ("thigh_r", [-0.8, 0.0, 0.0]),
+                    ("shin_l", [1.5, 0.0, 0.0]),
+                    ("shin_r", [1.5, 0.0, 0.0]),
+                    ("spine", [0.4, 0.0, 0.0]),
+                    ("neck", [-0.2, 0.0, 0.0]),
                 ],
             },
             Key {
@@ -455,8 +474,11 @@ fn climb(rig: &Rig) -> Clip {
     )
 }
 
-// Over a low wall: the left hand goes down on the top, both knees come up and
-// swing through beside it, and the legs reach for the far side.
+// Over a low wall, leaning on the left hand: the body tips toward that hand until
+// the shoulder is over it, the legs swing up and across on the other side, level
+// with the hips, and come down ahead. The course carries the hips a forearm above
+// the wall's top, and the hold puts the hand on it; these keys only say how the
+// body is arranged around those two.
 fn vault(rig: &Rig) -> Clip {
     keyed(
         rig,
@@ -465,71 +487,73 @@ fn vault(rig: &Rig) -> Clip {
         &[
             Key {
                 at: 0.0,
-                drop: 0.05,
+                drop: 0.03,
                 joints: &[
-                    ("spine", [0.3, 0.0, 0.0]),
-                    ("upper_arm_l", [-1.1, 0.0, 0.0]),
+                    ("spine", [0.35, 0.0, 0.0]),
+                    ("upper_arm_l", [-1.2, 0.0, 0.1]),
                     ("forearm_l", [-0.3, 0.0, 0.0]),
-                    ("upper_arm_r", [0.5, 0.0, 0.0]),
+                    ("upper_arm_r", [0.6, 0.0, 0.0]),
                     ("forearm_r", [-0.9, 0.0, 0.0]),
-                    ("thigh_l", [0.4, 0.0, 0.0]),
-                    ("shin_l", [0.5, 0.0, 0.0]),
-                    ("thigh_r", [-0.9, 0.0, 0.0]),
-                    ("shin_r", [1.2, 0.0, 0.0]),
+                    ("thigh_l", [0.3, 0.0, 0.0]),
+                    ("shin_l", [0.4, 0.0, 0.0]),
+                    ("thigh_r", [-0.5, 0.0, -0.4]),
+                    ("shin_r", [0.9, 0.0, 0.0]),
                 ],
             },
             Key {
-                at: 0.3,
-                drop: 0.15,
+                at: 0.25,
+                drop: 0.0,
                 joints: &[
-                    ("hips", [0.0, 0.0, 0.2]),
-                    ("spine", [0.5, 0.0, 0.0]),
-                    ("upper_arm_l", [-0.6, 0.0, 0.25]),
+                    ("hips", [0.2, 0.0, -0.6]),
+                    ("spine", [0.25, 0.0, -0.1]),
+                    ("neck", [-0.1, 0.0, 0.3]),
+                    ("upper_arm_l", [-0.7, 0.0, 0.3]),
+                    ("forearm_l", [-0.15, 0.0, 0.0]),
+                    ("upper_arm_r", [0.0, 0.0, -1.0]),
+                    ("forearm_r", [-0.5, 0.0, 0.0]),
+                    ("thigh_l", [-0.1, 0.0, -0.75]),
+                    ("shin_l", [0.8, 0.0, 0.0]),
+                    ("thigh_r", [-0.3, 0.0, -1.0]),
+                    ("shin_r", [0.3, 0.0, 0.0]),
+                ],
+            },
+            Key {
+                at: 0.5,
+                drop: 0.0,
+                joints: &[
+                    ("hips", [0.25, 0.0, -1.1]),
+                    ("spine", [0.15, 0.0, -0.15]),
+                    ("neck", [-0.2, 0.0, 0.5]),
+                    ("upper_arm_l", [0.0, 0.0, 0.5]),
                     ("forearm_l", [-0.1, 0.0, 0.0]),
-                    ("upper_arm_r", [0.2, 0.0, -0.6]),
-                    ("forearm_r", [-0.8, 0.0, 0.0]),
-                    ("thigh_l", [-1.0, 0.0, 0.0]),
-                    ("shin_l", [1.7, 0.0, 0.0]),
-                    ("thigh_r", [-1.6, 0.0, 0.0]),
-                    ("shin_r", [1.9, 0.0, 0.0]),
+                    ("upper_arm_r", [0.0, 0.0, -1.5]),
+                    ("forearm_r", [-0.4, 0.0, 0.0]),
+                    ("thigh_l", [-1.0, 0.0, -0.3]),
+                    ("shin_l", [0.6, 0.0, 0.0]),
+                    ("thigh_r", [-1.0, 0.0, -0.5]),
+                    ("shin_r", [0.3, 0.0, 0.0]),
                 ],
             },
             Key {
-                at: 0.55,
-                drop: 0.3,
+                at: 0.75,
+                drop: 0.0,
                 joints: &[
-                    ("hips", [0.0, 0.0, 0.45]),
-                    ("spine", [0.55, 0.0, -0.2]),
-                    ("upper_arm_l", [0.1, 0.0, 0.5]),
-                    ("forearm_l", [0.0, 0.0, 0.0]),
-                    ("upper_arm_r", [-0.3, 0.0, -0.9]),
+                    ("hips", [0.1, 0.0, -0.55]),
+                    ("spine", [0.2, 0.0, -0.05]),
+                    ("neck", [-0.1, 0.0, 0.25]),
+                    ("upper_arm_l", [0.6, 0.0, 0.4]),
+                    ("forearm_l", [-0.3, 0.0, 0.0]),
+                    ("upper_arm_r", [-0.3, 0.0, -0.8]),
                     ("forearm_r", [-0.6, 0.0, 0.0]),
-                    ("thigh_l", [-1.8, 0.0, 0.0]),
-                    ("shin_l", [1.9, 0.0, 0.0]),
-                    ("thigh_r", [-1.8, 0.0, 0.0]),
-                    ("shin_r", [1.8, 0.0, 0.0]),
-                    ("neck", [-0.3, 0.0, 0.0]),
-                ],
-            },
-            Key {
-                at: 0.8,
-                drop: 0.12,
-                joints: &[
-                    ("hips", [0.0, 0.0, 0.15]),
-                    ("spine", [0.25, 0.0, 0.0]),
-                    ("upper_arm_l", [0.8, 0.0, 0.3]),
-                    ("forearm_l", [-0.4, 0.0, 0.0]),
-                    ("upper_arm_r", [-0.5, 0.0, -0.3]),
-                    ("forearm_r", [-0.7, 0.0, 0.0]),
-                    ("thigh_l", [-1.0, 0.0, 0.0]),
-                    ("shin_l", [0.7, 0.0, 0.0]),
-                    ("thigh_r", [-0.6, 0.0, 0.0]),
-                    ("shin_r", [1.0, 0.0, 0.0]),
+                    ("thigh_l", [-0.9, 0.0, 0.0]),
+                    ("shin_l", [1.0, 0.0, 0.0]),
+                    ("thigh_r", [-1.1, 0.0, -0.15]),
+                    ("shin_r", [0.5, 0.0, 0.0]),
                 ],
             },
             Key {
                 at: 1.0,
-                drop: 0.05,
+                drop: 0.03,
                 joints: &[
                     ("spine", [0.15, 0.0, 0.0]),
                     ("upper_arm_l", [0.3, 0.0, 0.0]),

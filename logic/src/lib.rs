@@ -4,6 +4,7 @@ use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 pub mod body;
 pub mod debug;
 pub mod gait;
+pub mod hold;
 pub mod ledge;
 pub mod locomotion;
 pub mod park;

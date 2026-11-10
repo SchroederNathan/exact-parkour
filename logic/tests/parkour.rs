@@ -2,11 +2,11 @@
 //! checks the body on every tick, so a pass means the whole course was sound and
 //! not only its end.
 use exact_beat_em_up_logic::body::{self, Action, Parkour, HALF, RADIUS};
-use exact_beat_em_up_logic::ledge;
+use exact_beat_em_up_logic::{hold, ledge};
 use exact_beat_em_up_logic::park::{self, Block};
 use exact_beat_em_up_logic::{ExactBeatEmUp, Options};
 use exact_game::{InputEvent, PointerPhase, Sim, Transform, Vec3};
-use exact_game_physics::CapsuleController;
+use exact_game_physics::{self as physics, CapsuleController, Shape};
 
 type Game = Sim<ExactBeatEmUp>;
 
@@ -77,10 +77,29 @@ fn check(game: &Game, what: &str) {
     let at = centre(game);
     let v = velocity(game);
     assert!(at.is_finite() && v.is_finite(), "{what}: not finite: {at} {v}");
-    let down = matches!(action(game), Action::Ragdoll | Action::Rise { .. });
-    assert!(down || at.y > HALF - 0.05, "{what}: under the ground at {at}");
+    // A vault carries the centre at the hips, which are low over a low wall.
+    let low = match action(game) {
+        Action::Ragdoll | Action::Rise { .. } => 0.0,
+        Action::Vault(_) => HALF - 0.2,
+        _ => HALF - 0.05,
+    };
+    assert!(at.y > low, "{what}: under the ground at {at}");
     assert!(at.y > 0.0, "{what}: under the ground at {at}");
     assert!(at.x.abs() < 31.0 && at.z.abs() < 31.0, "{what}: left the park at {at}");
+    // On a wall, no part of the drawn body is in it: a bone may graze a surface,
+    // and no more.
+    let on_wall = match action(game) {
+        Action::Vault(_) => Some("vault"),
+        Action::Hang(_) => Some("hang"),
+        Action::Climb(_) => Some("climb"),
+        _ => None,
+    };
+    // The first moment of a hang is the catch, in which the arms come from
+    // wherever the jump had them.
+    let catching = matches!(action(game), Action::Hang(h) if h.time < body::SETTLE);
+    if let (Some(doing), Some((bone, depth)), false) = (on_wall, buried(game), catching) {
+        assert!(depth < 0.05, "{what}: {bone} is {depth} m inside a wall in a {doing}");
+    }
     // Under its own control the body is never inside a wall.
     if matches!(action(game), Action::Ground | Action::Air) {
         assert!(
@@ -193,11 +212,27 @@ fn a_jump_at_a_low_wall_vaults_it_from_any_side() {
                         matches!(action(g), Action::Vault(_))
                     });
                     assert!(vaulting, "no vault, doing {:?}", action(&game));
-                    // Over the top, never under it, and down on the far side.
-                    let over = run(&mut game, 1500.0, &what, |g| {
-                        matches!(action(g), Action::Ground)
-                    });
+                    // Over the top, never under it, and down on the far side. On
+                    // the way the left hand is down on the wall's top.
+                    let mut planted = 0;
+                    let mut over = false;
+                    for _ in 0..180 {
+                        game.run(TICK_MS);
+                        check(&game, &what);
+                        if let Action::Vault(path) = action(&game) {
+                            assert!(path.held, "nowhere to put the hand");
+                            let top = path.ledge.edge.y;
+                            assert!((path.hand.y - top - hold::WRIST).abs() < 0.03);
+                            let wrist = hold::joint(game.world(), "hand_l");
+                            planted += ((wrist - path.hand).length() < 0.01) as u32;
+                        }
+                        if matches!(action(&game), Action::Ground) {
+                            over = true;
+                            break;
+                        }
+                    }
                     assert!(over, "stuck in {:?}", action(&game));
+                    assert!(planted >= 6, "the hand was on the wall for {planted} ticks");
                     let beyond = -(feet(&game) - middle).dot(out);
                     assert!(
                         beyond > block.size[2] + 0.2,
@@ -266,11 +301,24 @@ fn a_jump_at_a_high_wall_grabs_its_edge_and_climbs() {
                 if matches!(action(&game), Action::Hang(_)) {
                     // It hangs still, with its hands at the edge.
                     steer(&mut game, Vec3::ZERO);
+                    run(&mut game, 400.0, &what, |_| false);
                     let held = centre(&game);
                     run(&mut game, 500.0, &what, |_| false);
                     assert_eq!(centre(&game), held, "slid while hanging");
                     let hands = feet(&game).y + ledge::HANG_REACH;
                     assert!((hands - block.top()).abs() < 0.02, "hands at {hands}");
+                    // Both hands are on the edge, a palm's thickness over it.
+                    for name in ["hand_l", "hand_r"] {
+                        let wrist = hold::joint(game.world(), name);
+                        let over = wrist.y - block.top();
+                        assert!((over - hold::WRIST).abs() < 0.015, "{name} is {over} m over the edge");
+                    }
+                    let holds = body::holds(game.world());
+                    assert_eq!(holds.len(), 2);
+                    for h in holds {
+                        let wrist = hold::joint(game.world(), h.limb.chain()[2]);
+                        assert!((wrist - h.at).length() < 0.015, "{:?} is off its hold", h.limb);
+                    }
                 } else {
                     assert_eq!(name, "ledge-low", "climbed without a hang");
                 }
@@ -409,6 +457,127 @@ fn a_short_hop_needs_no_recovery() {
     assert!(matches!(action(&game), Action::Ground), "{:?}", action(&game));
 }
 
+// The drawn body's bones as sampled points, each with its bone's name.
+const BONES: [(&str, &str); 13] = [
+    ("hips", "spine"),
+    ("spine", "chest"),
+    ("chest", "neck"),
+    ("thigh_l", "shin_l"),
+    ("shin_l", "foot_l"),
+    ("thigh_r", "shin_r"),
+    ("shin_r", "foot_r"),
+    ("upper_arm_l", "forearm_l"),
+    ("forearm_l", "hand_l"),
+    ("upper_arm_r", "forearm_r"),
+    ("forearm_r", "hand_r"),
+    ("foot_l", "toe"),
+    ("foot_r", "toe"),
+];
+// From the ankle to the tip of the toes, in the foot's frame.
+const TOE: Vec3 = Vec3::new(0.0, -0.06, 0.19);
 
+fn bones(game: &Game) -> Vec<(&'static str, Vec3)> {
+    let w = game.world();
+    BONES
+        .iter()
+        .flat_map(|&(from, to)| {
+            let a = hold::joint(w, from);
+            let b = if to == "toe" {
+                hold::point(w, from, TOE)
+            } else {
+                hold::joint(w, to)
+            };
+            (0..=4).map(move |i| (from, a.lerp(b, i as f32 / 4.0)))
+        })
+        .collect()
+}
 
+// How deep the drawn body is in something solid: the bone and the depth in metres
+// of the sampled point that is furthest in, if any is.
+fn buried(game: &Game) -> Option<(&'static str, f32)> {
+    let w = game.world();
+    bones(game)
+        .into_iter()
+        .filter_map(|(bone, at)| {
+            let inside = |radius: f32| {
+                let shape = Shape::Sphere { radius };
+                !physics::overlap(w, &shape, Transform::at(at.x, at.y, at.z), park::SOLID).is_empty()
+            };
+            // The largest sphere about the point that is wholly inside is its depth.
+            [0.12, 0.08, 0.05, 0.03, 0.015]
+                .into_iter()
+                .find(|&depth| {
+                    let around = [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z];
+                    inside(0.002)
+                        && around.iter().all(|d| {
+                            let p = at + *d * depth;
+                            let shape = Shape::Sphere { radius: 0.002 };
+                            !physics::overlap(w, &shape, Transform::at(p.x, p.y, p.z), park::SOLID)
+                                .is_empty()
+                        })
+                })
+                .map(|depth| (bone, depth))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+}
 
+// Prints one move tick by tick: where the drawn body is against the wall.
+#[test]
+#[ignore]
+fn trace() {
+    let name = std::env::var("BLOCK").unwrap_or("vault-mid".into());
+    let slant: f32 = std::env::var("SLANT").map_or(0.0, |s| s.parse().unwrap());
+    let every: usize = std::env::var("EVERY").map_or(4, |s| s.parse().unwrap());
+    let block = park::named(&name);
+    let mut game = start();
+    let near: f32 = std::env::var("NEAR").map_or(0.6, |s| s.parse().unwrap());
+    approach(&mut game, block, slant, 3.0, near, false);
+    for tick in 0..260 {
+        game.run(TICK_MS);
+        if std::env::var("UP").is_ok() && tick == 120 {
+            steer(&mut game, Vec3::ZERO);
+            game.tap("Space");
+        }
+        let w = game.world();
+        let j = |n: &str| hold::joint(w, n);
+        let (u, kind) = match action(&game) {
+            Action::Vault(p) => (p.progress(), "vault"),
+            Action::Climb(p) => (p.progress(), "climb"),
+            Action::Hang(h) => (h.time, "hang"),
+            _ => (-1.0, ""),
+        };
+        if u < 0.0 || tick % every != 0 {
+            continue;
+        }
+        if std::env::var("DEEP").is_ok() {
+            let (middle, out) = south_face(block);
+            for (bone, at) in bones(&game) {
+                let before = (at - middle).dot(out);
+                let over = at.y - block.top();
+                if before < 0.0 && over < 0.0 {
+                    println!("{tick:3} {kind} {u:.2} {bone} {before:+.3}/{over:+.3}");
+                }
+            }
+            continue;
+        }
+        let top = block.top();
+        let holds = body::holds(w);
+        let off: Vec<String> = holds
+            .iter()
+            .map(|h| format!("{:.3}", (j(h.limb.chain()[2]) - h.at).length()))
+            .collect();
+        let (_, out) = south_face(block);
+        let (middle, _) = south_face(block);
+        let rel = |n: &str| {
+            let p = j(n);
+            format!("{n} {:+.2}/{:+.2}", (p - middle).dot(out), p.y - top)
+        };
+        println!(
+            "{tick:3} {kind} {u:.2} hips {:+.2} shoulder {:+.2} holds {off:?} buried {:?} {} {} {} {} {}",
+            j("hips").y - top,
+            j("upper_arm_l").y - top,
+            buried(&game),
+            rel("hips"), rel("shin_l"), rel("foot_l"), rel("shin_r"), rel("foot_r"),
+        );
+    }
+}
