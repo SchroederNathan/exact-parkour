@@ -11,7 +11,7 @@ Rooftop Rumble is a small Exact game prototype. A jointed stick man runs, vaults
 | Jump, vault, climb | Space | South button | Jump |
 | Slide | C or Left Control | East button | Slide |
 
-Desktop and web keep the playfield clear. Coarse-pointer devices show the move stick, round Sprint, Slide and Jump buttons, and a native glass Pause button. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
+Desktop and web keep the playfield clear. Coarse-pointer devices show the move stick, round Sprint, Slide and Jump buttons, and a Pause button, each drawn as the platform's own glass. On a screen under 600 points wide the three round buttons stand in a column. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
 
 ## Moves
 
@@ -33,6 +33,8 @@ A hanging body stays on the edge until the stick stops pushing at the wall. Afte
 | Away from the wall | Let go |
 | Along the wall, and Jump | Leap that way and up, and catch the next edge on the wall if there is one |
 | Away from the wall, and Jump | Jump off the wall, backward |
+
+A body stands on its feet: with no ground within a foot's width under it, it slips off the edge it is past.
 
 A slide starts from 2.5 m/s or more. It lasts 0.8 s, keeps 85 percent of the speed, steers a little, and ends in a run. Jump cuts it short.
 
@@ -65,7 +67,7 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 35 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 36 hostless tests and the determinism lints.
 
 - `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
