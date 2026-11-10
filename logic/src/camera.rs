@@ -93,7 +93,7 @@ pub mod tune {
     pub const FOLLOW_RATE_MAX: f32 = 2.8;
     pub const FOLLOW_ACCEL: f32 = 10.0;
     /// An error larger than this, rad, is a reversal: the view always swings the
-    /// `REVERSAL_WAY` (-1: clockwise from above, the eye passes on its own shoulder's side).
+    /// `REVERSAL_WAY` (-1: clockwise from above).
     pub const REVERSAL: f32 = 2.8;
     pub const REVERSAL_WAY: f32 = -1.0;
     // The rate can always fall as fast as the proportional target falls, so the
@@ -118,7 +118,7 @@ pub mod tune {
     pub const LEASH_UP: f32 = 0.45;
     pub const LEASH_DOWN: f32 = 0.15;
     /// A touchdown pushes the focus down: m/s of focus speed per m/s of impact, and
-    /// the most, m/s. With `LIFT_FEET` the deepest dip is speed / (e * 16): 7 cm.
+    /// the most, m/s. It adds to the fall speed the focus brings in on its leash.
     pub const DIP: f32 = 0.30;
     pub const DIP_MAX: f32 = 3.2;
     /// Time constant, s, of the camera's estimate of the body's velocity.
@@ -366,8 +366,7 @@ impl Rig {
         self.shake.trauma = 0.0;
     }
     fn shoot(&mut self, w: &World, subject: &Subject, dt: f32) -> Shot {
-        let cut =
-            std::mem::take(&mut self.cut) || subject.centre.distance(self.track.centre) > CUT;
+        let cut = std::mem::take(&mut self.cut) || subject.centre.distance(self.track.centre) > CUT;
         if cut {
             self.place(subject);
         }
@@ -396,8 +395,7 @@ impl Rig {
         self.follow
             .step(&mut self.heading, want, self.look.owns(), pace, dt);
         self.look.settle(want.is_some(), self.follow.authority, dt);
-        let target =
-            Framing::framed(self.viewport).staged(subject.stance, pace, self.framing.boom);
+        let target = Framing::framed(self.viewport).staged(subject.stance, pace, self.framing.boom);
         self.framing.ease(target, dt);
         if subject.impact > 0.0 {
             self.focus.lift -= (subject.impact * DIP).min(DIP_MAX);
@@ -459,6 +457,7 @@ impl Look {
                 self.hold = (self.hold - dt).max(0.0);
             }
         }
+        // The last of the tail goes out whole, so the view comes to rest.
         let turn = if self.pending.length_squared() < 1e-10 {
             self.pending
         } else {
@@ -565,9 +564,8 @@ impl Follow {
             FOLLOW_TIME_SPRINT,
             math::smoothstep(RUN, SPRINT, pace),
         );
-        let wish = error.map_or(0.0, |e| {
-            (e / time).clamp(-FOLLOW_RATE_MAX, FOLLOW_RATE_MAX)
-        }) * self.authority;
+        let wish = error.map_or(0.0, |e| (e / time).clamp(-FOLLOW_RATE_MAX, FOLLOW_RATE_MAX))
+            * self.authority;
         self.rate += (wish - self.rate).clamp(-FOLLOW_ACCEL * dt, FOLLOW_ACCEL * dt);
         let mut step = self.rate * dt;
         if let Some(error) = error {
@@ -587,12 +585,17 @@ enum Stance {
     /// On the ground or on a scripted course: run, vault, climb, roll, land, late rise.
     Feet,
     /// In the air. `fall` is the downward speed, m/s, zero while rising.
-    Air { fall: f32 },
+    Air {
+        fall: f32,
+    },
     Slide,
     /// Hanging from an edge. `facing` is the yaw of the way into the wall, rad
     /// (zero faces +Z, as `Parkour::yaw`). `along` is the shimmy speed over
     /// `body::SHIMMY` plus the lean past the edge's end, -1 to 1, left positive.
-    Hang { facing: f32, along: f32 },
+    Hang {
+        facing: f32,
+        along: f32,
+    },
     /// The ragdoll has the body, or it has only begun to rise.
     Limp,
 }
@@ -901,7 +904,10 @@ fn spring(at: f32, speed: f32, to: f32, omega: f32, dt: f32) -> (f32, f32) {
     let decay = math::exp(-omega * dt);
     let from = at - to;
     let travel = (speed + omega * from) * dt;
-    (to + (from + travel) * decay, (speed - omega * travel) * decay)
+    (
+        to + (from + travel) * decay,
+        (speed - omega * travel) * decay,
+    )
 }
 
 /// Trauma a touchdown of `impact` m/s adds.
@@ -915,7 +921,13 @@ fn trauma_of(impact: f32) -> f32 {
 ///
 /// A wall beside the runner ends the first leg early: the eye slides in behind the
 /// body and keeps its distance. Only a wall behind the runner shortens the boom.
-fn clear(w: &World, subject: &Subject, focus: &Focus, framing: &mut Framing, basis: &Basis) -> Vec3 {
+fn clear(
+    w: &World,
+    subject: &Subject,
+    focus: &Focus,
+    framing: &mut Framing,
+    basis: &Basis,
+) -> Vec3 {
     let lift = framing.height - body::HALF;
     // The sweeps start inside the capsule, which the body keeps clear of solids.
     let reach = body::HALF - body::RADIUS;

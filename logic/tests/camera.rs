@@ -197,7 +197,12 @@ fn touch(sim: &mut Game, phase: PointerPhase, dx: f32, dy: f32) {
 // Move the finger that is down by `dx`, `dy` points in `ticks` equal steps.
 fn slide(sim: &mut Game, dx: f32, dy: f32, ticks: u32) {
     for _ in 0..ticks {
-        touch(sim, PointerPhase::Move, dx / ticks as f32, dy / ticks as f32);
+        touch(
+            sim,
+            PointerPhase::Move,
+            dx / ticks as f32,
+            dy / ticks as f32,
+        );
         sim.run(TICK_MS);
     }
 }
@@ -266,7 +271,10 @@ fn a_rotated_phone_reframes_without_a_jump() {
     for _ in 0..360 {
         sim.run(TICK_MS);
         let now = eye(&sim);
-        assert!(now.distance(before) < 0.05, "the eye jumped {before} to {now}");
+        assert!(
+            now.distance(before) < 0.05,
+            "the eye jumped {before} to {now}"
+        );
         before = now;
     }
     let view = camera::view(sim.world());
@@ -281,7 +289,12 @@ fn an_unknown_viewport_is_landscape_and_the_first_report_places_the_framing() {
         let view = camera::view(sim.world());
         assert_eq!(
             (view.boom, view.shoulder, view.elevation, view.fov),
-            (framing.boom, framing.shoulder, framing.elevation, framing.fov)
+            (
+                framing.boom,
+                framing.shoulder,
+                framing.elevation,
+                framing.fov
+            )
         );
     }
     let mut sim = start();
@@ -397,10 +410,12 @@ fn tilt_stops_at_its_limits_and_leaves_them_at_once() {
     sim.run(500.0);
     assert!(elevation(&sim) > level, "a swipe down looks down");
 
-    drag(&mut sim, 0.0, 10_000.0, 20);
-    sim.run(500.0);
+    // Far past the limit, and back at once: the finger does not lift or wait.
+    touch(&mut sim, PointerPhase::Down, 0.0, 0.0);
+    slide(&mut sim, 0.0, 10_000.0, 20);
     assert_eq!(elevation(&sim), tune::ELEVATION_MAX);
-    drag(&mut sim, 0.0, -(tune::TAP_SLOP + 20.0), 4);
+    slide(&mut sim, 0.0, -20.0, 4);
+    touch(&mut sim, PointerPhase::Up, 0.0, 0.0);
     sim.run(500.0);
     assert!(
         (elevation(&sim) - tune::ELEVATION_MAX + 20.0 * tune::TILT_PER_POINT).abs() < 1e-3,
@@ -426,7 +441,8 @@ fn the_view_stops_with_the_finger() {
     sim.run(1000.0);
     let later = camera::view(sim.world());
     assert!(
-        (later.yaw - stopped.yaw).abs() < 1e-3 && (later.elevation - stopped.elevation).abs() < 1e-3,
+        (later.yaw - stopped.yaw).abs() < 1e-3
+            && (later.elevation - stopped.elevation).abs() < 1e-3,
         "the view kept turning: {stopped:?} to {later:?}"
     );
 }
@@ -481,7 +497,10 @@ fn the_debug_camera_command_holds_a_fixed_offset_until_a_drag() {
     for _ in 0..60 {
         sim.run(TICK_MS);
         let held = eye(&sim) - centre(&sim);
-        assert!(held.distance(offset) < 1e-4, "the eye is {held} from the body");
+        assert!(
+            held.distance(offset) < 1e-4,
+            "the eye is {held} from the body"
+        );
     }
     sim.key_up("KeyW");
     let pose = *sim.get::<Transform>("camera").unwrap();
@@ -557,7 +576,10 @@ fn the_follow_turns_without_a_step_and_does_not_pass_the_travel() {
     sim.key_down("KeyD");
     for _ in 0..300 {
         let now = turn(&mut sim, "running");
-        assert!(now > behind_the_run - 1e-3, "the view passed the travel: {now}");
+        assert!(
+            now > behind_the_run - 1e-3,
+            "the view passed the travel: {now}"
+        );
     }
     sim.key_up("KeyD");
     sim.key_down("KeyA");
@@ -613,7 +635,10 @@ fn a_new_direction_is_read_against_the_screen() {
     sim.hold("KeyD", 2500.0);
     sim.key_down("KeyW");
     let view = ahead(yaw(&sim));
-    assert!(view.dot(Vec3::X) > 0.9, "the view is behind the run: {view}");
+    assert!(
+        view.dot(Vec3::X) > 0.9,
+        "the view is behind the run: {view}"
+    );
     sim.run(200.0);
     let from = feet(&sim);
     sim.run(500.0);
@@ -637,7 +662,11 @@ fn a_finger_owns_the_view_then_the_follow_eases_back() {
     assert_eq!(yaw(&sim), manual, "a held finger owns the view");
     touch(&mut sim, PointerPhase::Up, 0.0, 0.0);
     sim.run(f64::from(tune::LOOK_HOLD) * 1000.0 - 50.0);
-    assert_eq!(yaw(&sim), manual, "the view is the player's after the release");
+    assert_eq!(
+        yaw(&sim),
+        manual,
+        "the view is the player's after the release"
+    );
     sim.run(2500.0);
     let from = feet(&sim);
     sim.run(500.0);
@@ -754,7 +783,10 @@ fn a_landing_dips_the_rig_and_it_recovers() {
         sim.run(TICK_MS);
         dip = dip.max(rest - anchor(&sim));
     }
-    assert!(dip > 0.01 && dip < 0.08, "the landing dipped the rig {dip} m");
+    assert!(
+        dip > 0.01 && dip < 0.08,
+        "the landing dipped the rig {dip} m"
+    );
     assert!(
         (anchor(&sim) - rest).abs() < 0.005,
         "the rig is not back half a second after the landing"
@@ -767,17 +799,17 @@ fn a_sprint_widens_the_view() {
     let fov = |sim: &Game| sim.get::<Camera>("camera").unwrap().fov_y_degrees;
     sim.key_down("KeyW");
     sim.run(2000.0);
+    let running = fov(&sim);
     assert!(
-        (fov(&sim) - tune::LANDSCAPE.fov).abs() < 0.05,
-        "a run changed the field of view to {}",
-        fov(&sim)
+        (running - tune::LANDSCAPE.fov).abs() < 0.05,
+        "a run changed the field of view to {running}"
     );
     sim.key_down("ShiftLeft");
     sim.run(2500.0);
+    let sprinting = fov(&sim);
     assert!(
-        (fov(&sim) - tune::LANDSCAPE.fov - tune::SPRINT_FOV).abs() < 0.1,
-        "the field of view at a sprint is {}",
-        fov(&sim)
+        sprinting > running + 1.0 && (sprinting - running - tune::SPRINT_FOV).abs() < 0.1,
+        "the field of view is {sprinting} at a sprint and {running} at a run"
     );
 }
 
@@ -808,7 +840,9 @@ fn a_hang_is_seen_from_behind_and_above_and_a_shimmy_turns_the_view() {
     sim.run(100.0);
     let level = camera::view(sim.world()).elevation;
     sim.key_down("KeyW");
-    assert!(run_until(&mut sim, 4000.0, |sim| feet(sim).z - RADIUS + 12.0 < 0.35));
+    assert!(run_until(&mut sim, 4000.0, |sim| feet(sim).z - RADIUS
+        + 12.0
+        < 0.35));
     sim.tap("Space");
     let hanging = |sim: &Game| matches!(action(sim), Action::Hang(_));
     assert!(run_until(&mut sim, 900.0, hanging), "{:?}", action(&sim));
@@ -858,7 +892,10 @@ fn a_ragdoll_is_centred_and_the_view_does_not_chase_the_tumble() {
         view.yaw
     );
     assert!(view.shoulder < 0.1, "the tumble is off centre: {view:?}");
-    assert!(view.boom > tune::LANDSCAPE.boom + 0.5 * tune::LIMP_BOOM, "{view:?}");
+    assert!(
+        view.boom > tune::LANDSCAPE.boom + 0.5 * tune::LIMP_BOOM,
+        "{view:?}"
+    );
 }
 
 #[test]
@@ -918,7 +955,10 @@ fn a_wall_behind_the_runner_shortens_the_boom_at_once_and_it_lengthens_slowly() 
         );
         before = now;
     }
-    assert!((before - open).abs() < 0.01, "the boom came back to {before} m");
+    assert!(
+        (before - open).abs() < 0.01,
+        "the boom came back to {before} m"
+    );
 }
 
 #[test]
@@ -1007,7 +1047,9 @@ fn the_nod_is_locked_to_the_footfalls() {
         *slice = (slice.0 + pitch, slice.1 + 1);
     }
     let means = slices.map(|(sum, count)| sum / count as f32);
-    let deepest = (0..20).min_by(|&a, &b| means[a].total_cmp(&means[b])).unwrap();
+    let deepest = (0..20)
+        .min_by(|&a, &b| means[a].total_cmp(&means[b]))
+        .unwrap();
     let highest = means.iter().copied().fold(f32::MIN, f32::max);
     assert!(
         highest - means[deepest] > tune::STEP_PITCH,
