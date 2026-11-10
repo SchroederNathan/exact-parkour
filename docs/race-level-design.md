@@ -19,7 +19,7 @@ Each level is one file in `logic/src/race/` with one function, `pub fn level() -
 | `level.on(name, [x, base, z], [width, height, depth], look)` | A box that stands on the height `base`: a wall, a vent, a step, an upper storey |
 | `level.deck(name, [x, top, z], [width, thick, depth], look)` | A box whose top is at the height `top`: a plank, a bridge, a balcony |
 | `level.ramp(name, from, to, width, thick, look)` | A slab from point to point. Level points make a plank at any angle; other points make a ramp |
-| `level.stairs(name, from, to, width, look)` | Drawn steps over an unseen ramp. The runner keeps its full speed on it |
+| `level.stairs(name, from, to, width, look)` | Drawn steps over an unseen ramp, so no step stops the runner. Its slope slows a sprint as a ramp's does |
 | `level.gate(name, [x, base, z], span, yaw)` | A slide gate: a bar between two posts. A slide goes under it; a run does not pass |
 | `level.backdrop(name, [x, z], [width, depth], roof)` | A far building that nothing touches |
 | `level.fall_below(y)` | The fall line for the checkpoints added after this call |
@@ -70,6 +70,8 @@ Other moves, from the README:
 - A drop of up to 0.9 m needs no recovery. Up to 2 m the runner kneels and runs on. Up to about 3.5 m it rolls. A drop of 4 m or more throws the runner down, and it needs 3.5 s to get up.
 - A slide starts at 2.5 m/s or more. It covers about 2.5 m from a run and 4.6 m from a sprint. Under a bar the slide goes on until the runner is clear.
 - A slope up to 50 degrees is walked. A step up to 0.15 m is walked.
+- A slope slows a sprint. Up a ramp or a stair of 12 degrees the runner sprints at 5.9 m/s, at 14 degrees 5.3 m/s, at 17 degrees 3.8 m/s and at 21 degrees 2.5 m/s. A stair that must keep the speed has a run of 4.5 times its rise.
+- A sprint landing on a roof 1.5 m lower can roll. The roll takes 0.7 s and leaves the runner at 3.4 m/s. Steps of 1 m in a run of jumps keep the speed.
 
 ## Rules
 
@@ -81,9 +83,10 @@ Other moves, from the README:
 6. A slide gate needs 4 m of straight path before it and 3 m clear after it. Close the path beside its posts with a wall or a roof edge.
 7. An edge to hang from is the top of a wall at least 1 m tall. Keep a move along an edge under 4 m.
 8. A checkpoint stands on a surface, at least 1 m from any wall, with 4 m of run-up toward the next obstacle. The time between two checkpoints is at most 15 s.
-9. Set `fall_below` a little under the lowest surface of the route in that part. A lower roof that is off the route must be under the fall line, so no runner is left on a roof with no way on.
-10. Keep 3 m clear above the route. The camera is behind the runner's right shoulder.
-11. A level has at most 400 pieces. One stair is about 7 pieces for each metre of rise.
+9. A checkpoint counts when the runner reaches it, also when an earlier one was missed. The finish needs no checkpoint. So a fast line can pass a checkpoint, and the fall line of the checkpoint before it must be under every roof of that fast line.
+10. Set `fall_below` a little under the lowest surface of the route in that part. A lower roof that is off the route must be under the fall line, so no runner is left on a roof with no way on.
+11. Keep 3 m clear above the route. The camera is behind the runner's right shoulder.
+12. A level has at most 400 pieces. One stair is about 7 pieces for each metre of rise.
 
 ## What makes a level good
 
