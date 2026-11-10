@@ -977,3 +977,123 @@ fn trace() {
     }
 }
 
+
+// Writes one scenario tick by tick, as a line of JSON for each tick, to the file
+// `FILM` names: every joint of the drawn body, for `tools/film.py` to draw.
+//
+// `SCENE` is `wall` (run at `BLOCK` and jump `NEAR` metres from it; `UP` presses
+// jump again at that tick), `jumps` (run north and jump at each tick in `AT`),
+// or `gap` (the run of roofs, from roof `FROM`).
+#[test]
+#[ignore]
+fn film() {
+    use std::io::Write;
+    let var = |name: &str, or: &str| std::env::var(name).unwrap_or(or.into());
+    let number = |name: &str, or: f32| std::env::var(name).map_or(or, |s| s.parse().unwrap());
+    let path = var("FILM", "/tmp/film.jsonl");
+    let mut out = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+    let scene = var("SCENE", "wall");
+    let sprint = std::env::var("SPRINT").is_ok();
+    let ticks = number("TICKS", 300.0) as usize;
+    let mut game = start();
+    // The side view looks along `left`: `ahead` is to the right of the picture.
+    let (origin, ahead, top, presses): (Vec3, Vec3, f32, Vec<usize>) = match scene.as_str() {
+        "wall" => {
+            let block = park::named(&var("BLOCK", "ledge-mid"));
+            let (middle, out) = south_face(block);
+            approach(
+                &mut game,
+                block,
+                number("SLANT", 0.0),
+                number("BACK", 3.0),
+                number("NEAR", 0.35),
+                sprint,
+            );
+            let up = std::env::var("UP").map_or(vec![], |s| vec![s.parse().unwrap()]);
+            (middle, -out, block.top(), up)
+        }
+        "jumps" => {
+            place(&mut game, Vec3::new(0.0, 0.0, 22.0), -Vec3::Z);
+            game.run(60.0);
+            if number("STILL", 0.0) == 0.0 {
+                steer(&mut game, -Vec3::Z);
+            }
+            if sprint {
+                game.key_down("ShiftLeft");
+            }
+            let at = var("AT", "90,200");
+            let presses = at.split(',').map(|s| s.parse().unwrap()).collect();
+            (Vec3::new(0.0, 0.0, 22.0), -Vec3::Z, 0.0, presses)
+        }
+        "gap" => {
+            let from = park::named(&var("FROM", "gap-4"));
+            let to = park::named(&var("TO", "gap-5"));
+            place(
+                &mut game,
+                Vec3::new(from.at[0], from.top(), from.at[2] - number("BACK", 1.0)),
+                Vec3::Z,
+            );
+            game.run(60.0);
+            steer(&mut game, Vec3::Z);
+            if sprint {
+                game.key_down("ShiftLeft");
+            }
+            let lip = from.at[2] + from.size[2] / 2.0;
+            let near = number("NEAR", 0.35);
+            run(&mut game, 3000.0, "film", |g| feet(g).z > lip - near);
+            game.tap("Space");
+            let up = std::env::var("UP").map_or(vec![], |s| vec![s.parse().unwrap()]);
+            let face = Vec3::new(to.at[0], 0.0, to.at[2] - to.size[2] / 2.0);
+            (face, Vec3::Z, to.top(), up)
+        }
+        other => panic!("film: no scene `{other}`"),
+    };
+    let left = Vec3::Y.cross(ahead);
+    writeln!(out, "{{\"top\":{top},\"scene\":\"{scene}\"}}").unwrap();
+    const JOINTS: [&str; 17] = [
+        "hips", "spine", "chest", "neck", "head",
+        "thigh_l", "shin_l", "foot_l", "thigh_r", "shin_r", "foot_r",
+        "upper_arm_l", "forearm_l", "hand_l", "upper_arm_r", "forearm_r", "hand_r",
+    ];
+    for tick in 0..ticks {
+        if presses.contains(&tick) {
+            if std::env::var("RELEASE").is_ok() {
+                steer(&mut game, Vec3::ZERO);
+            }
+            game.tap("Space");
+        }
+        game.run(TICK_MS);
+        let w = game.world();
+        let (kind, u) = match action(&game) {
+            Action::Ground => ("ground", 0.0),
+            Action::Air => ("air", 0.0),
+            Action::Vault(p) => ("vault", p.progress()),
+            Action::Climb(p) => ("climb", p.progress()),
+            Action::Hang(h) => ("hang", h.time),
+            Action::Roll { .. } => ("roll", 0.0),
+            Action::Slide { .. } => ("slide", 0.0),
+            Action::Land { .. } => ("land", 0.0),
+            Action::Ragdoll => ("ragdoll", 0.0),
+            Action::Rise { .. } => ("rise", 0.0),
+        };
+        let flat = |p: Vec3| {
+            let d = p - origin;
+            format!("[{:.4},{:.4},{:.4}]", d.dot(ahead), d.y, d.dot(left))
+        };
+        let mut joints: Vec<String> = JOINTS
+            .iter()
+            .map(|n| format!("\"{n}\":{}", flat(hold::joint(w, n))))
+            .collect();
+        for side in ["l", "r"] {
+            let toe = hold::point(w, &format!("foot_{side}"), TOE);
+            joints.push(format!("\"toe_{side}\":{}", flat(toe)));
+        }
+        writeln!(
+            out,
+            "{{\"t\":{tick},\"act\":\"{kind}\",\"u\":{u:.3},\"c\":{},\"j\":{{{}}}}}",
+            flat(centre(&game)),
+            joints.join(",")
+        )
+        .unwrap();
+    }
+}
