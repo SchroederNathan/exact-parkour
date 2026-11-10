@@ -13,6 +13,8 @@ shape Hud
   enemies: number
   hits: number
   phase: string
+  move_x: number
+  move_y: number
 
 component ExactBeatEmUp
   state playing = false
@@ -28,6 +30,9 @@ component ExactBeatEmUp
   resource hud = exactSurface("world") as shape Hud
   derive touch = viewport.pointer == "coarse"
   derive narrow = viewport.width < 600
+  derive stickX = paused ? 0 : hud.move_x
+  derive stickY = paused ? 0 : hud.move_y
+  derive stickActive = stickX * stickX + stickY * stickY > 0.0001
   derive sprintRight = narrow ? "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 30px)" : "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 128px)"
   derive sprintBottom = narrow ? "calc(env(safe-area-inset-bottom) + 132px)" : "calc(env(safe-area-inset-bottom) + 24px)"
   derive slideRight = narrow ? "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 34px)" : "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 136px)"
@@ -116,7 +121,7 @@ component ExactBeatEmUp
   view
     main width="100%" height="100%" position="relative" viewport-fit="cover" background-color="#101822" color="#f4f7f8"
       if playing
-        canvas surface=world(seed=7, mode=mode, race=race, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden"
+        canvas surface=world(seed=7, mode=mode, race=race, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden" touch-action="none"
           row position="absolute" top="calc(env(safe-area-inset-top) + 12px)" left="calc(env(safe-area-inset-left) + 20px)" right="calc(env(safe-area-inset-right) + 20px)" justify-content="space-between" pointer-events="none"
             row gap=8 pointer-events="auto"
               if hud.mode == "arena"
@@ -151,24 +156,22 @@ component ExactBeatEmUp
               button press=chooseArenaFromPause testId="arena-holdout" aria-label="Rooftop Holdout"
                 text "Rooftop Holdout"
           if touch
-            button action="move" role="slider" appearance="none" testId="move" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 border-radius=56 background-color="transparent" aria-label="Move"
-            button action="sprint" id="sprint" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="sprint" position="absolute" right=sprintRight bottom=sprintBottom width=84 height=84 border-radius=42 background-color="transparent" aria-label="Sprint"
-            button action="slide" id="slide" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="slide" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 border-radius=38 background-color="transparent" aria-label="Slide"
-            button action="jump" id="jump" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="jump" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 border-radius=48 background-color="transparent" aria-label="Jump"
-          if touch
-            button appearance="none" testId="move-face" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width="7rem" height="7rem" pointer-events="none" aria-hidden=true
-              text "Move"
-            button appearance="none" testId="sprint-face" position="absolute" right=sprintRight bottom=sprintBottom width="5.25rem" height="5.25rem" pointer-events="none" aria-hidden=true
-              text "Sprint"
-            button appearance="none" testId="slide-face" position="absolute" right=slideRight bottom=slideBottom width="4.75rem" height="4.75rem" pointer-events="none" aria-hidden=true
-              text "Slide"
-            button appearance="none" testId="jump-face" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width="6rem" height="6rem" pointer-events="none" aria-hidden=true
-              text "Jump"
+            button action="move" role="slider" appearance="none" testId="move" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 box-sizing="border-box" padding=0 border-radius=56 background-color="#101822aa" border="1px solid #d9edf580" touch-action="none" aria-label="Move"
+              column position="absolute" left=13 top=13 width=84 height=84 box-sizing="border-box" border-radius=42 border="1px solid #d9edf530" pointer-events="none" aria-hidden=true
+              column testId="move-thumb" position="absolute" left=(33 + stickX * 30) top=(33 - stickY * 30) width=44 height=44 box-sizing="border-box" border-radius=22 background-color=(stickActive ? "#e5f6fff2" : "#d9edf5bb") border="2px solid #ffffffcc" box-shadow="0 2px 8px #00000055" pointer-events="none" aria-hidden=true
+              text "Move" position="absolute" left=0 right=0 bottom=6 text-align="center" font-size=11 font-weight=600 color="#ffffff" pointer-events="none" aria-hidden=true
+            button action="sprint" id="sprint" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="sprint" position="absolute" right=sprintRight bottom=sprintBottom width=84 height=84 box-sizing="border-box" padding=0 border-radius=42 background-color="#101822bb" border="1px solid #d9edf580" color="#ffffff" display="flex" align-items="center" justify-content="center" aria-label="Sprint"
+              text "Sprint" font-size=14 font-weight=600 pointer-events="none"
+            button action="slide" id="slide" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="slide" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 box-sizing="border-box" padding=0 border-radius=38 background-color="#101822bb" border="1px solid #d9edf580" color="#ffffff" display="flex" align-items="center" justify-content="center" aria-label="Slide"
+              text "Slide" font-size=14 font-weight=600 pointer-events="none"
+            button action="jump" id="jump" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="jump" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 box-sizing="border-box" padding=0 border-radius=48 background-color="#244a60dd" border="1px solid #d9edf5aa" color="#ffffff" display="flex" align-items="center" justify-content="center" aria-label="Jump"
+              text "Jump" font-size=16 font-weight=700 pointer-events="none"
       else
         column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=20
           text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
           text "Pick a route or hold the rooftop against escalating hordes." max-width="23.75rem" text-align="center" color="#b8c8ce"
           text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width="22.5rem" text-align="center" color="#b8c8ce"
+          text "The camera follows your direction. Swipe or drag the scene to look around." max-width="22.5rem" text-align="center" color="#b8c8ce"
           row gap=12 flex-wrap="wrap" justify-content="center"
             button buttonStyle="filled" press=chooseRace0 autofocus aria-label="Skyline Sprint" testId="play"
               text "Skyline Sprint"

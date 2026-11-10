@@ -341,6 +341,10 @@ fn publish(w: &mut World) {
     let hits = state.player_hits as u32;
     let phase = format!("{:?}", state.phase);
     drop(state);
+    let (move_x, move_y) = {
+        let stick = w.resource::<crate::TouchStick>();
+        (stick.x, stick.y)
+    };
     w.publish_record(&crate::Hud {
         mode: "arena".into(),
         race: "Rooftop Holdout".into(),
@@ -351,5 +355,7 @@ fn publish(w: &mut World) {
         enemies,
         hits,
         phase,
+        move_x,
+        move_y,
     });
 }

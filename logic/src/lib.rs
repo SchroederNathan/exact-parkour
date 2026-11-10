@@ -3,6 +3,7 @@ use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
 pub mod arena;
 pub mod body;
+pub mod camera;
 pub mod debug;
 pub mod gait;
 pub mod hold;
@@ -62,6 +63,14 @@ pub struct Hud {
     pub enemies: u32,
     pub hits: u32,
     pub phase: String,
+    pub move_x: f32,
+    pub move_y: f32,
+}
+
+#[derive(Default, Resource)]
+pub struct TouchStick {
+    pub x: f32,
+    pub y: f32,
 }
 
 pub struct ExactBeatEmUp;
@@ -73,6 +82,7 @@ impl Game for ExactBeatEmUp {
     fn actions() -> Actions {
         Actions::new()
             .stick("move", Stick::wasd().or_arrows().or_pad(Pad::Left))
+            .button("orbit", &["MouseLeft"])
             .button("jump", &["Space", "GamepadSouth"])
             .button(
                 "sprint",
@@ -83,10 +93,13 @@ impl Game for ExactBeatEmUp {
 
     fn register(w: &mut World, _: &std::collections::BTreeMap<&str, Value>) {
         arena::register(w);
+        w.register_resource::<camera::Orbit>();
+        w.register_resource::<TouchStick>();
     }
 
     fn setup(w: &mut World, args: &Options) {
         w.reseed(args.seed);
+        w.insert_resource(TouchStick::default());
         let sky = Color::hex("#9bb8c7");
         w.insert_resource(Environment {
             background: Some(sky),
@@ -197,17 +210,7 @@ impl Game for ExactBeatEmUp {
                 Stride::default(),
             ),
         );
-        w.spawn_named(
-            "camera",
-            (
-                Transform::default(),
-                Camera::default(),
-                Follow::new(player)
-                    .offset(0.0, 6.0, 8.0)
-                    .look_at_offset(0.0, 0.8 - body::HALF, 0.0)
-                    .lag(0.12),
-            ),
-        );
+        camera::setup(w);
         w.spawn_named(
             "sun",
             (
@@ -222,7 +225,14 @@ impl Game for ExactBeatEmUp {
     }
 
     fn tick(w: &mut World, input: &Input, args: &Options) {
+        let stick = input.stick("move");
+        {
+            let mut touch = w.resource_mut::<TouchStick>();
+            touch.x = stick.x;
+            touch.y = stick.y;
+        }
         debug::commands(w, input);
+        camera::input(w, input);
         if args.mode == ARENA_MODE {
             arena::tick(w);
         } else {
@@ -233,6 +243,7 @@ impl Game for ExactBeatEmUp {
         locomotion::drive(w, "stickman", motion);
         animation::step(w);
         body::present(w);
+        camera::present(w, motion);
         if args.mode == RACE_MODE {
             race::tick(w);
         }

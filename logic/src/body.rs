@@ -381,7 +381,7 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
         body.glide = false;
     }
     let controls = Controls {
-        wish: planar(input.stick_xz("move")).clamp_length_max(1.0),
+        wish: crate::camera::movement(w, planar(input.stick_xz("move"))).clamp_length_max(1.0),
         jump: input.pressed("jump") || said("touch jump"),
         sprint: input.held("sprint") || body.glide,
         slide: input.pressed("slide") || said("touch slide"),

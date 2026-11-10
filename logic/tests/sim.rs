@@ -250,8 +250,41 @@ fn a_touch_stick_walks_at_every_speed_without_sliding() {
 }
 
 #[test]
+fn touch_hud_shows_analog_direction_and_recenters_on_release_or_cancel() {
+    use exact_beat_em_up_logic::{ARENA_MODE, RACE_MODE};
+    use exact_game::{InputEvent, PointerPhase};
+    let control = |phase, x, y| InputEvent::Control {
+        name: "move".into(), id: 1, phase, x, y, at_ms: 0.0, player: 0,
+    };
+    for mode in [RACE_MODE, ARENA_MODE] {
+        for end in [PointerPhase::Up, PointerPhase::Cancel] {
+            let mut game = Sim::<ExactBeatEmUp>::new(Options { mode, ..Options::default() }).unwrap();
+            game.input(control(PointerPhase::Down, 56.0, 56.0));
+            game.input(control(PointerPhase::Move, 86.0, 26.0));
+            game.run(25.0);
+            let published = |game: &Sim<ExactBeatEmUp>, key| game.world().published(key).unwrap().as_number().unwrap();
+            assert_eq!(published(&game, "move_x"), 0.5);
+            assert_eq!(published(&game, "move_y"), 0.5);
+            game.input(control(PointerPhase::Move, 500.0, -500.0));
+            game.run(25.0);
+            let x = published(&game, "move_x");
+            let y = published(&game, "move_y");
+            assert!(x > 0.0 && y > 0.0);
+            assert!((x * x + y * y - 1.0).abs() < 0.0001, "thumb stays in its circular range");
+            game.input(control(end, 500.0, -500.0));
+            game.run(25.0);
+            assert_eq!(published(&game, "move_x"), 0.0);
+            assert_eq!(published(&game, "move_y"), 0.0);
+        }
+    }
+}
+
+#[test]
 fn legs_never_jump_between_ticks() {
     let mut game = start();
+    // Camera-relative turns change this route; keep the gait check on open ground.
+    game.post("goto 0 0 15 180");
+    game.run(25.0);
     let mut worst: f32 = 0.0;
     let mut before = ankles(&game);
     let mut step = |game: &mut Sim<ExactBeatEmUp>, ms: f64| {

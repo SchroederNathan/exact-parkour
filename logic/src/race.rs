@@ -280,6 +280,10 @@ pub fn tick(w: &mut World) {
         w.emit("race-finished");
     }
     let seconds = (w.tick().saturating_sub(started) as f32 / w.hz() as f32).min(999.9);
+    let (move_x, move_y) = {
+        let stick = w.resource::<crate::TouchStick>();
+        (stick.x, stick.y)
+    };
     w.publish_record(&crate::Hud {
         mode: "race".into(),
         race: route.title.into(),
@@ -290,5 +294,7 @@ pub fn tick(w: &mut World) {
         enemies: 0,
         hits: 0,
         phase: "racing".into(),
+        move_x,
+        move_y,
     });
 }

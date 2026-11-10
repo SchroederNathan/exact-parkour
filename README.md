@@ -11,7 +11,9 @@ Rooftop Rumble is a small Exact game prototype. A jointed stick man runs, vaults
 | Jump, vault, climb | Space | South button | Jump |
 | Slide | C or Left Control | East button | Slide |
 
-Desktop and web keep the playfield clear. Coarse-pointer devices show the move stick, round Sprint, Slide and Jump buttons, and a Pause button, each drawn as the platform's own glass. On a screen under 600 points wide the three round buttons stand in a column. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
+The low third-person camera turns smoothly behind your direction of travel. Swipe or click-drag the scene to look around; drag vertically to tilt it. Automatic following waits briefly after a swipe and resumes when moving. A fresh movement direction uses the camera's frame, while holding that direction keeps your path steady as the camera catches up. The camera sways slightly while running, bumps on landings, and pulls in before hitting walls. The movement stick and action buttons can be held while another finger pans the scene.
+
+Desktop and web keep the playfield clear. Coarse-pointer devices show a circular move pad, round Sprint, Slide and Jump buttons, and a Pause button. The controls have translucent backgrounds and visible outlines. The move pad's thumb follows the actual analog input, stays inside its circular range, and recenters when released. On a screen under 600 points wide the three round buttons stand in a column. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
 
 ## Moves
 

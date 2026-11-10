@@ -43,10 +43,7 @@ pub fn commands(w: &mut World, input: &Input) {
                 c.support = None;
             }
             ("camera", &[x, y, z]) => {
-                w.require_mut::<Follow>("camera").offset = Vec3::new(x, y, z);
-                // The follower carries its last up vector along. Level it, or a
-                // camera moved round the body keeps the roll of where it was.
-                w.require_mut::<Transform>("camera").rotation = Quat::IDENTITY;
+                crate::camera::set_offset(w, Vec3::new(x, y, z));
             }
             ("roller", &[kind, speed]) => {
                 let (at, yaw) = {
