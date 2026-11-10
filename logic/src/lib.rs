@@ -9,6 +9,7 @@ pub mod gait;
 pub mod hold;
 pub mod ledge;
 pub mod locomotion;
+mod mannequin;
 pub mod park;
 pub mod race;
 pub mod ragdoll;

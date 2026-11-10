@@ -1,4 +1,4 @@
-//! The stick man: his skeleton, his clips and the Animator that plays them.
+//! The mannequin's skeleton, clips and Animator.
 //!
 //! Locomotion is one blend along ground speed: a still stance at zero, then the
 //! family of gaits in `gait::PACES`.
@@ -1074,7 +1074,9 @@ pub fn model(rig: &Rig) -> Model {
     ];
     clips.extend(crate::rise::clips(rig));
     clips.extend(PACES.iter().map(|p| gait::clip(rig, p)));
-    rig.model(clips)
+    let mut model = rig.model(clips);
+    crate::mannequin::skin(&mut model, rig);
+    model
 }
 
 /// One state per `Act`, and from each an edge to every other on the number `act`.

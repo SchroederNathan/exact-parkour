@@ -1,6 +1,6 @@
 # Rooftop Rumble
 
-Rooftop Rumble is a small Exact game prototype. A jointed stick man runs, vaults, climbs, rolls and falls through an obstacle park. The player and every object share one Rapier physics world with real gravity.
+Rooftop Rumble is a small Exact game prototype. An articulated wooden mannequin runs, vaults, climbs, rolls and falls through an obstacle park. The player and every object share one Rapier physics world with real gravity.
 
 ## Controls
 
@@ -64,12 +64,15 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 - `logic/src/rise.rs`: the two get-ups. Each is a list of stages that place the hips, wrists and ankles; the engine's two-bone solver turns the limbs to reach them, so a planted hand or foot does not move.
 - `logic/src/gait.rs`, `logic/src/locomotion.rs`: the gait clips and the clock that keeps planted feet still.
 - `logic/src/stickman.rs`: the skeleton, the other clips and the Animator, which has one state per action.
+- `logic/src/mannequin.rs`: the shaped mannequin mesh: rounded chest and pelvis, tapered limbs, ball joints, hands and feet. It keeps the existing skeleton and hand sockets; rigid limb weights retain the carved shapes while the torso blends across the spine.
 - `logic/src/debug.rs`: `goto`, `camera` and `roller` messages for setting up a scene from an agent.
 - `app.contract`: the title screen and the touch controls.
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 36 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 48 hostless tests and the determinism lints.
+
+- `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
 - `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
