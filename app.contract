@@ -4,6 +4,11 @@ shape Viewport
   height: number
 
 shape Hud
+  mode: string
+  race: string
+  subtitle: string
+  seconds: number
+  finished: bool
   round: number
   enemies: number
   hits: number
@@ -13,6 +18,8 @@ component ExactBeatEmUp
   state playing = false
   state paused = false
   state again = false
+  state mode = 0
+  state race = 0
   state home = ""
   state under = ""
   state lent = false
@@ -27,13 +34,54 @@ component ExactBeatEmUp
   derive slideBottom = narrow ? "calc(env(safe-area-inset-bottom) + 228px)" : "calc(env(safe-area-inset-bottom) + 120px)"
   derive jumpBottom = narrow ? "calc(env(safe-area-inset-bottom) + 24px)" : "calc(env(safe-area-inset-bottom) + 56px)"
 
-  action play
+  action chooseRace0
+    mode = 0
+    race = 0
+    playing = true
+
+  action chooseRace1
+    mode = 0
+    race = 1
+    playing = true
+
+  action chooseRace2
+    mode = 0
+    race = 2
+    playing = true
+
+  action chooseArena
+    mode = 1
+    race = 0
     playing = true
 
   action togglePause
     paused = not paused
 
   action restart
+    again = not again
+    paused = false
+
+  action chooseFromPause0
+    mode = 0
+    race = 0
+    again = not again
+    paused = false
+
+  action chooseFromPause1
+    mode = 0
+    race = 1
+    again = not again
+    paused = false
+
+  action chooseFromPause2
+    mode = 0
+    race = 2
+    again = not again
+    paused = false
+
+  action chooseArenaFromPause
+    mode = 1
+    race = 0
     again = not again
     paused = false
 
@@ -68,35 +116,65 @@ component ExactBeatEmUp
   view
     main width="100%" height="100%" position="relative" viewport-fit="cover" background-color="#101822" color="#f4f7f8"
       if playing
-        canvas surface=world(seed=7, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden"
+        canvas surface=world(seed=7, mode=mode, race=race, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden"
+          row position="absolute" top="calc(env(safe-area-inset-top) + 12px)" left="calc(env(safe-area-inset-left) + 20px)" right="calc(env(safe-area-inset-right) + 20px)" justify-content="space-between" pointer-events="none"
+            row gap=8 pointer-events="auto"
+              if hud.mode == "arena"
+                text `ROUND ${hud.round}` padding=10 border-radius=12 background-color="#101822bb" font-weight=700
+              else
+                text hud.race padding=10 border-radius=12 background-color="#101822bb" font-weight=700
+              if hud.mode == "arena"
+                text `HOSTILES ${hud.enemies}` padding=10 border-radius=12 background-color="#101822bb" font-variant-numeric="tabular-nums"
+              else
+                text `${hud.seconds.toFixed(1)}s` padding=10 border-radius=12 background-color="#101822bb" font-variant-numeric="tabular-nums"
+            row gap=8 pointer-events="auto"
+              if paused
+                button appearance="none" press=restart testId="restart" aria-label="Restart" padding=10 border-radius=12 background-color="#2b5364" color="#ffffff"
+                  text "Restart"
+              button appearance="none" press=togglePause testId="pause" aria-label=(paused ? "Resume" : "Pause") padding=10 border-radius=12 background-color="#101822bb" color="#ffffff"
+                text (paused ? "Resume" : "Pause")
+          if hud.mode == "arena"
+            column testId="combat-hud" position="absolute" top="calc(env(safe-area-inset-top) + 62px)" left="calc(env(safe-area-inset-left) + 20px)" gap=4 pointer-events="none"
+              text `DAMAGE ${hud.hits} / 3` font-size=14 color=(hud.hits >= 2 ? "#ff7b7b" : "#c7d8e5") font-variant-numeric="tabular-nums"
+              text hud.phase font-size=12 color="#dbe9f1"
+          if hud.finished
+            text "FINISH" position="absolute" top="46%" left=0 right=0 padding=18 text-align="center" border-radius=16 background-color="#0b1824dd" font-size=30 font-weight=800
+          if paused
+            column position="absolute" top="calc(env(safe-area-inset-top) + 78px)" right="calc(env(safe-area-inset-right) + 20px)" padding=16 gap=8 border-radius=16 background-color="#101822ee"
+              text "Choose a level" font-weight=700
+              button press=chooseFromPause0 testId="race-skyline" aria-label="Skyline Sprint"
+                text "Skyline Sprint"
+              button press=chooseFromPause1 testId="race-switchback" aria-label="Switchback Run"
+                text "Switchback Run"
+              button press=chooseFromPause2 testId="race-helix" aria-label="Helix Heights"
+                text "Helix Heights"
+              button press=chooseArenaFromPause testId="arena-holdout" aria-label="Rooftop Holdout"
+                text "Rooftop Holdout"
           if touch
             button action="move" role="slider" appearance="none" testId="move" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 border-radius=56 background-color="transparent" aria-label="Move"
             button action="sprint" id="sprint" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="sprint" position="absolute" right=sprintRight bottom=sprintBottom width=84 height=84 border-radius=42 background-color="transparent" aria-label="Sprint"
             button action="slide" id="slide" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="slide" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 border-radius=38 background-color="transparent" aria-label="Slide"
             button action="jump" id="jump" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="jump" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 border-radius=48 background-color="transparent" aria-label="Jump"
-        if touch
-          row position="absolute" top="calc(env(safe-area-inset-top) + 12px)" left="calc(env(safe-area-inset-left) + 20px)" right="calc(env(safe-area-inset-right) + 20px)" justify-content="space-between" pointer-events="none"
-            button buttonStyle="glass" press=togglePause testId="pause" pointer-events="auto" aria-label=(paused ? "Resume" : "Pause")
-              text (paused ? "Resume" : "Pause")
-            if paused
-              button buttonStyle="prominent-glass" press=restart testId="restart" pointer-events="auto" aria-label="Restart"
-                text "Restart"
-          button buttonStyle="glass" testId="move-face" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 pointer-events="none" aria-hidden=true
-            text "Move"
-          button buttonStyle=(under == "sprint" ? "prominent-glass" : "glass") testId="sprint-face" position="absolute" right=sprintRight bottom=sprintBottom width=84 height=84 pointer-events="none" aria-hidden=true
-            text "Sprint"
-          button buttonStyle=(under == "slide" ? "prominent-glass" : "glass") testId="slide-face" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 pointer-events="none" aria-hidden=true
-            text "Slide"
-          button buttonStyle=(under == "jump" ? "prominent-glass" : "glass") testId="jump-face" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 pointer-events="none" aria-hidden=true
-            text "Jump"
-        column testId="combat-hud" position="absolute" top="calc(env(safe-area-inset-top) + 16px)" left="calc(env(safe-area-inset-left) + 20px)" gap=6 pointer-events="none"
-          text `ROUND ${hud.round}` font-size=18 font-weight=700 letter-spacing=1 color="#f6d365" aria-live="polite"
-          text `HOSTILES ${hud.enemies}` font-size=14 color="#ffffff" font-variant-numeric="tabular-nums"
-          text `DAMAGE ${hud.hits} / 3` font-size=14 color=(hud.hits >= 2 ? "#ff7b7b" : "#c7d8e5") font-variant-numeric="tabular-nums"
+          if touch
+            button buttonStyle="glass" testId="move-face" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 pointer-events="none" aria-hidden=true
+              text "Move"
+            button buttonStyle=(under == "sprint" ? "prominent-glass" : "glass") testId="sprint-face" position="absolute" right=sprintRight bottom=sprintBottom width=84 height=84 pointer-events="none" aria-hidden=true
+              text "Sprint"
+            button buttonStyle=(under == "slide" ? "prominent-glass" : "glass") testId="slide-face" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 pointer-events="none" aria-hidden=true
+              text "Slide"
+            button buttonStyle=(under == "jump" ? "prominent-glass" : "glass") testId="jump-face" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 pointer-events="none" aria-hidden=true
+              text "Jump"
       else
-        column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=24
-          text "ROOFTOP HOLDOUT" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
-          text "Dual pistols. Escalating hordes. Keep moving." max-width=360 text-align="center" color="#b8c8ce"
-          text "Move with WASD or the arrow keys. Your pistols raise and auto-target the nearest hostile." max-width=360 text-align="center" color="#b8c8ce"
-          button buttonStyle="filled" press=play autofocus aria-label="Play" testId="play"
-            text "Play"
+        column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=20
+          text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
+          text "Pick a route or hold the rooftop against escalating hordes." max-width=380 text-align="center" color="#b8c8ce"
+          text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width=360 text-align="center" color="#b8c8ce"
+          row gap=12 flex-wrap="wrap" justify-content="center"
+            button buttonStyle="filled" press=chooseRace0 autofocus aria-label="Skyline Sprint" testId="play"
+              text "Skyline Sprint"
+            button buttonStyle="filled" press=chooseRace1 aria-label="Switchback Run" testId="race-switchback"
+              text "Switchback Run"
+            button buttonStyle="filled" press=chooseRace2 aria-label="Helix Heights" testId="race-helix"
+              text "Helix Heights"
+            button buttonStyle="filled" press=chooseArena aria-label="Rooftop Holdout" testId="arena"
+              text "Rooftop Holdout"

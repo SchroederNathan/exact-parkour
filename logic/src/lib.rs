@@ -9,6 +9,7 @@ pub mod hold;
 pub mod ledge;
 pub mod locomotion;
 pub mod park;
+pub mod race;
 pub mod ragdoll;
 pub mod rise;
 pub mod stickman;
@@ -18,6 +19,8 @@ use locomotion::Stride;
 
 /// Half the side of the square park, metres.
 pub const PARK: f32 = 30.0;
+pub const RACE_MODE: u32 = 0;
+pub const ARENA_MODE: u32 = 1;
 
 #[derive(Default, Component)]
 pub struct Player;
@@ -26,9 +29,26 @@ pub struct Player;
 pub struct Options {
     pub seed: u64,
     #[live]
+    pub mode: u32,
+    #[live]
+    pub race: u32,
+    #[live]
     pub paused: bool,
     #[restart]
     pub restart: bool,
+}
+
+#[derive(Default, Data)]
+pub struct Hud {
+    pub mode: String,
+    pub race: String,
+    pub subtitle: String,
+    pub seconds: f32,
+    pub finished: bool,
+    pub round: u32,
+    pub enemies: u32,
+    pub hits: u32,
+    pub phase: String,
 }
 
 pub struct ExactBeatEmUp;
@@ -103,7 +123,10 @@ impl Game for ExactBeatEmUp {
             );
         }
 
-        park::setup(w);
+        if args.mode == RACE_MODE {
+            park::setup(w);
+            race::setup(w, args.race as u8);
+        }
 
         let rig = stickman::rig(body::HEIGHT);
         let player_mesh = w
@@ -112,10 +135,15 @@ impl Game for ExactBeatEmUp {
         // The capsule stays upright; the visual is its child and does the turning.
         // It starts half a turn about Y: facing up the screen, away from the camera.
         let half_turn = std::f32::consts::PI;
+        let player_start = if args.mode == RACE_MODE {
+            race::start_position(args.race as u8)
+        } else {
+            Vec3::ZERO
+        };
         let player = w.spawn_named(
             "player",
             (
-                Transform::at(0.0, body::HALF + 0.01, 0.0),
+                Transform::at(player_start.x, body::HALF + 0.01, player_start.z),
                 CapsuleController {
                     radius: body::RADIUS,
                     height: body::HEIGHT,
@@ -133,7 +161,9 @@ impl Game for ExactBeatEmUp {
                 Player,
             ),
         );
-        arena::setup(w, player);
+        if args.mode == ARENA_MODE {
+            arena::setup(w, player);
+        }
         w.spawn_named(
             "stickman",
             (
@@ -173,14 +203,20 @@ impl Game for ExactBeatEmUp {
         args.paused
     }
 
-    fn tick(w: &mut World, input: &Input, _: &Options) {
+    fn tick(w: &mut World, input: &Input, args: &Options) {
         debug::commands(w, input);
-        arena::tick(w);
-        park::tick(w);
+        if args.mode == ARENA_MODE {
+            arena::tick(w);
+        } else {
+            park::tick(w);
+        }
         let motion = body::step(w, input);
         physics::step(w);
         locomotion::drive(w, "stickman", motion);
         animation::step(w);
         body::present(w);
+        if args.mode == RACE_MODE {
+            race::tick(w);
+        }
     }
 }
