@@ -93,6 +93,18 @@ fn lens_is_clear(sim: &Game) -> bool {
     .is_empty()
 }
 
+// The camera's rotation without the view's own turn and tilt: what shakes it.
+fn shake(sim: &Game) -> Quat {
+    let view = camera::view(sim.world());
+    let steady = Quat::from_rotation_y(view.yaw) * Quat::from_rotation_x(-view.elevation);
+    steady.inverse() * sim.get::<Transform>("camera").unwrap().rotation
+}
+
+// How far the shake turns the view axis, degrees.
+fn shaken(sim: &Game) -> f32 {
+    (shake(sim) * Vec3::Z).angle_between(Vec3::Z).to_degrees()
+}
+
 // Where a world point is on a canvas of `viewport` points, origin at the top left.
 #[track_caller]
 fn screen(sim: &Game, viewport: Vec2, point: Vec3) -> Vec2 {
@@ -958,4 +970,94 @@ fn the_lens_stays_out_of_solid_geometry() {
             }
         }
     }
+}
+
+#[test]
+fn the_shake_at_a_stand_is_subtle_and_never_moves_the_eye() {
+    let mut sim = start();
+    let from = eye(&sim);
+    let (mut least, mut most) = (f32::MAX, 0.0f32);
+    for _ in 0..600 {
+        sim.run(TICK_MS);
+        assert!(eye(&sim).distance(from) < 0.001, "the shake moved the eye");
+        least = least.min(shaken(&sim));
+        most = most.max(shaken(&sim));
+    }
+    assert!(
+        most > 0.05 && most < 0.4,
+        "the view wanders {most} degrees at a stand"
+    );
+    assert!(most - least > 0.05, "the view is turned, and does not move");
+}
+
+#[test]
+fn the_nod_is_locked_to_the_footfalls() {
+    let mut sim = start();
+    sim.key_down("ShiftLeft");
+    sim.key_down("KeyW");
+    sim.run(1000.0);
+    // The mean pitch of the shake in twenty slices of a step. A step is half a
+    // gait cycle. The slow handheld drift averages out of every slice.
+    let mut slices = [(0.0f32, 0u32); 20];
+    for _ in 0..480 {
+        sim.run(TICK_MS);
+        let phase = sim.get::<Pose>("stickman").unwrap().phase;
+        let pitch = (shake(&sim) * -Vec3::Z).y.asin();
+        let slice = &mut slices[((phase * 2.0).fract() * 20.0) as usize % 20];
+        *slice = (slice.0 + pitch, slice.1 + 1);
+    }
+    let means = slices.map(|(sum, count)| sum / count as f32);
+    let deepest = (0..20).min_by(|&a, &b| means[a].total_cmp(&means[b])).unwrap();
+    let highest = means.iter().copied().fold(f32::MIN, f32::max);
+    assert!(
+        highest - means[deepest] > tune::STEP_PITCH,
+        "the view does not nod with the steps: {means:?}"
+    );
+    // Slice `n` is `n / 40` of a cycle after a foot strikes.
+    let after_strike = (deepest as f32 + 0.5) / 40.0;
+    assert!(
+        (after_strike - tune::STEP_LATE).abs() < 0.03,
+        "the nod is deepest {after_strike} of a cycle after a strike"
+    );
+}
+
+#[test]
+fn a_hard_landing_shakes_the_view_and_the_shake_ends() {
+    let mut sim = start();
+    sim.post("goto 0 3.5 0 180");
+    assert!(run_until(&mut sim, 500.0, |sim| action(sim) == Action::Air));
+    assert!(run_until(&mut sim, 2000.0, |sim| action(sim) != Action::Air));
+    assert_ne!(action(&sim), Action::Ragdoll);
+    let mut most = 0.0f32;
+    for _ in 0..36 {
+        sim.run(TICK_MS);
+        most = most.max(shaken(&sim));
+    }
+    assert!(
+        most > 0.5 && most < 2.0,
+        "the landing shook the view {most} degrees"
+    );
+    sim.run(500.0);
+    for _ in 0..60 {
+        sim.run(TICK_MS);
+        assert!(shaken(&sim) < 0.4, "the view still shakes after 0.8 s");
+    }
+}
+
+#[test]
+fn a_knock_down_shakes_the_view() {
+    let mut sim = start();
+    sim.post("goto 0 0 0 90");
+    sim.run(100.0);
+    sim.post("roller 3 6");
+    assert!(run_until(&mut sim, 2000.0, |sim| action(sim) == Action::Ragdoll));
+    let mut most = 0.0f32;
+    for _ in 0..24 {
+        sim.run(TICK_MS);
+        most = most.max(shaken(&sim));
+    }
+    assert!(
+        most > 0.5 && most < 2.0,
+        "the knock shook the view {most} degrees"
+    );
 }

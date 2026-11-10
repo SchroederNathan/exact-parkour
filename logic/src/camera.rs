@@ -10,11 +10,14 @@
 //! yaw is never stored: it is `frame + swing`. Movement reads `frame` alone, so the
 //! follow cannot bend a held stick.
 //!
+//! Shake is rotation only and is applied after collision, so it cannot move the
+//! lens into a wall.
+//!
 //! Call `input` before `body::step` and `present` last in the tick.
 use exact_game::*;
 use exact_game_physics::{self as physics, Shape};
 
-use crate::body::{self, Action, Motion, Parkour};
+use crate::body::{self, Act, Action, Motion, Parkour};
 use crate::gait::{RUN, SPRINT};
 use crate::park;
 
@@ -147,6 +150,34 @@ pub mod tune {
     pub const CROWD_FAR: f32 = 1.2;
     pub const CROWD_NEAR: f32 = 0.5;
     pub const CROWD_LIFT: f32 = 0.35;
+
+    /// Scales all three layers of the shake. One number to calm the camera.
+    pub const SHAKE: f32 = 1.0;
+    /// Handheld drift at a stand, rad per axis (0.13 degrees), its two frequencies,
+    /// Hz, and how many times larger it is at `SPRINT`.
+    pub const HANDHELD: f32 = 0.0022;
+    pub const HANDHELD_HZ: [f32; 2] = [0.23, 0.37];
+    pub const HANDHELD_RUN: f32 = 2.0;
+    /// Footfall, locked to the gait cycle: pitch nod per step and roll per stride,
+    /// rad at `SPRINT` (0.29 and 0.34 degrees), and how late in the cycle the nod
+    /// is deepest after a foot strikes.
+    pub const STEP_PITCH: f32 = 0.0050;
+    pub const STEP_ROLL: f32 = 0.0060;
+    pub const STEP_LATE: f32 = 0.06;
+    /// Seconds for the footfall layer to fade in and out.
+    pub const STEP_FADE: f32 = 0.12;
+    /// Trauma: amplitudes at trauma 1, rad (1.5, 0.9, 1.25 degrees), the rattle's
+    /// frequency, Hz, and how much trauma is lost per second. Amplitude is trauma².
+    pub const TRAUMA_PITCH: f32 = 0.026;
+    pub const TRAUMA_YAW: f32 = 0.016;
+    pub const TRAUMA_ROLL: f32 = 0.022;
+    pub const RATTLE_HZ: f32 = 13.0;
+    pub const TRAUMA_DECAY: f32 = 1.8;
+    /// A touchdown slower than `IMPACT_QUIET` m/s adds no trauma; one of
+    /// `IMPACT_FULL` m/s (`body::HARD`) adds 1. A knock-down adds `KNOCK_TRAUMA`.
+    pub const IMPACT_QUIET: f32 = 2.5;
+    pub const IMPACT_FULL: f32 = 9.0;
+    pub const KNOCK_TRAUMA: f32 = 0.8;
 
     /// Radius of the sphere swept for the lens, m, and the gap it keeps, m.
     pub const LENS: f32 = 0.20;
@@ -299,6 +330,7 @@ struct Rig {
     /// The eased framing, after collision. Not the target.
     framing: Framing,
     focus: Focus,
+    shake: Shake,
     /// Canvas size in points as `input` last saw it; zero before the host reports one.
     viewport: Vec2,
     /// The next `present` places the rig instead of easing it.
@@ -328,8 +360,10 @@ impl Rig {
         self.track = Track {
             centre: subject.centre,
             velocity: Vec3::ZERO,
+            limp: subject.stance == Stance::Limp,
         };
         self.follow.rate = 0.0;
+        self.shake.trauma = 0.0;
     }
     fn shoot(&mut self, w: &World, subject: &Subject, dt: f32) -> Shot {
         let cut =
@@ -337,7 +371,9 @@ impl Rig {
         if cut {
             self.place(subject);
         }
-        self.track.step(subject.centre, dt);
+        if self.track.step(subject, dt) {
+            self.shake.hit(KNOCK_TRAUMA);
+        }
         if let Some(offset) = self.inspect {
             let basis = Basis::new(
                 math::atan2(offset.x, offset.z),
@@ -365,13 +401,14 @@ impl Rig {
         self.framing.ease(target, dt);
         if subject.impact > 0.0 {
             self.focus.lift -= (subject.impact * DIP).min(DIP_MAX);
+            self.shake.hit(trauma_of(subject.impact));
         }
         self.focus.step(subject, dt);
         let basis = Basis::new(self.heading.view(), self.elevation());
         Shot {
             pose: Transform {
                 position: clear(w, subject, &self.focus, &mut self.framing, &basis),
-                rotation: basis.rotation(),
+                rotation: basis.rotation() * self.shake.step(pace, subject.stride, dt),
                 ..Transform::default()
             },
             fov: self.framing.fov,
@@ -624,6 +661,9 @@ struct Subject {
     rising: f32,
     /// Downward speed of a touchdown this tick, m/s; zero otherwise.
     impact: f32,
+    /// Phase of the gait cycle, 0 to 1, while the feet run on the ground. The left
+    /// foot strikes at 0 and the right at 0.5 (`gait::planted`).
+    stride: Option<f32>,
 }
 
 impl Subject {
@@ -633,6 +673,10 @@ impl Subject {
             stance: Stance::of(&w.require::<Parkour>("player"), &motion),
             rising: motion.rising,
             impact: motion.impact,
+            stride: w
+                .get::<Pose>("stickman")
+                .filter(|_| motion.act == Act::Move && motion.grounded)
+                .map(|pose| pose.phase),
         }
     }
 }
@@ -645,12 +689,18 @@ struct Track {
     /// Smoothed velocity from the centre's own motion, m/s. It is right on scripted
     /// courses and in a ragdoll, where the controller's velocity is not.
     velocity: Vec3,
+    /// Whether the stance was `Limp` last tick.
+    limp: bool,
 }
 
 impl Track {
-    fn step(&mut self, centre: Vec3, dt: f32) {
-        self.velocity = math::ease(self.velocity, (centre - self.centre) / dt, VELOCITY_LAG, dt);
-        self.centre = centre;
+    /// Take this tick's body. Returns whether it went limp this tick: a knock-down.
+    fn step(&mut self, subject: &Subject, dt: f32) -> bool {
+        let moved = subject.centre - self.centre;
+        self.velocity = math::ease(self.velocity, moved / dt, VELOCITY_LAG, dt);
+        self.centre = subject.centre;
+        let was = std::mem::replace(&mut self.limp, subject.stance == Stance::Limp);
+        self.limp && !was
     }
 }
 
@@ -755,6 +805,68 @@ impl Focus {
     }
 }
 
+/// Camera shake as rotation: handheld drift, footfall, trauma.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
+struct Shake {
+    /// 0 to 1. Events add to it and it decays at `TRAUMA_DECAY` per second.
+    trauma: f32,
+    /// Phases of the two handheld waves, rad, wrapped at a full turn.
+    drift: Vec2,
+    /// Phase of the trauma rattle, rad, wrapped at a full turn.
+    rattle: f32,
+    /// Weight of the footfall layer, 0 to 1, faded over `STEP_FADE`.
+    footfall: f32,
+    /// The gait phase the footfall layer last saw. It fades out on this phase
+    /// when the feet leave the ground.
+    stride: f32,
+}
+
+impl Shake {
+    fn hit(&mut self, trauma: f32) {
+        self.trauma = (self.trauma + trauma).min(1.0);
+    }
+    /// Advance and return this tick's rotation, to apply after the view's own.
+    fn step(&mut self, pace: f32, stride: Option<f32>, dt: f32) -> Quat {
+        use std::f32::consts::TAU;
+        self.drift.x = (self.drift.x + TAU * HANDHELD_HZ[0] * dt) % TAU;
+        self.drift.y = (self.drift.y + TAU * HANDHELD_HZ[1] * dt) % TAU;
+        self.rattle = (self.rattle + TAU * RATTLE_HZ * dt) % TAU;
+        self.trauma = (self.trauma - TRAUMA_DECAY * dt).max(0.0);
+        let fade = dt / STEP_FADE;
+        self.footfall = match stride {
+            Some(phase) => {
+                self.stride = phase;
+                (self.footfall + fade).min(1.0)
+            }
+            None => (self.footfall - fade).max(0.0),
+        };
+        let fast = (pace / SPRINT).min(1.0);
+        let (a, b) = (self.drift.x, self.drift.y);
+
+        let hand = HANDHELD * (1.0 + (HANDHELD_RUN - 1.0) * fast);
+        let mut pitch = hand * (0.6 * math::sin(a) + 0.4 * math::sin(2.0 * b + 1.3));
+        let mut yaw = hand * (0.6 * math::sin(b) + 0.4 * math::sin(2.0 * a + 2.1));
+        let mut roll = hand * 0.6 * math::sin(a + b);
+
+        // Two steps per cycle: a nod after each strike, and a roll onto the
+        // planted side.
+        let step = self.footfall * fast;
+        pitch -= STEP_PITCH * step * math::cos(2.0 * TAU * (self.stride - STEP_LATE));
+        roll += STEP_ROLL * step * math::sin(TAU * self.stride);
+
+        // A wrapped phase takes whole multiples only, so the three axes use the
+        // rattle's first three harmonics.
+        let rattle = self.trauma * self.trauma;
+        pitch += TRAUMA_PITCH * rattle * math::sin(self.rattle);
+        roll += TRAUMA_ROLL * rattle * math::sin(2.0 * self.rattle + 0.5);
+        yaw += TRAUMA_YAW * rattle * math::sin(3.0 * self.rattle + 1.0);
+
+        Quat::from_rotation_y(yaw * SHAKE)
+            * Quat::from_rotation_x(pitch * SHAKE)
+            * Quat::from_rotation_z(roll * SHAKE)
+    }
+}
+
 /// The view's axes for a yaw and an elevation.
 #[derive(Clone, Copy, Debug)]
 struct Basis {
@@ -790,6 +902,11 @@ fn spring(at: f32, speed: f32, to: f32, omega: f32, dt: f32) -> (f32, f32) {
     let from = at - to;
     let travel = (speed + omega * from) * dt;
     (to + (from + travel) * decay, (speed - omega * travel) * decay)
+}
+
+/// Trauma a touchdown of `impact` m/s adds.
+fn trauma_of(impact: f32) -> f32 {
+    ((impact - IMPACT_QUIET) / (IMPACT_FULL - IMPACT_QUIET)).clamp(0.0, 1.0)
 }
 
 /// Keep the lens out of solid geometry and return the eye. Shortens
