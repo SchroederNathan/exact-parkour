@@ -51,6 +51,19 @@ pub mod tune {
     pub const ELEVATION_LAG: f32 = 0.28;
     pub const FOV_LAG: f32 = 0.35;
 
+    /// Radians of yaw per point of horizontal drag: 0.34 degrees, a quarter turn in 262 points.
+    pub const YAW_PER_POINT: f32 = 0.0060;
+    /// Radians of tilt per point of vertical drag: 0.22 degrees. Lower than yaw.
+    pub const TILT_PER_POINT: f32 = 0.0038;
+    /// Points a contact must travel before it turns the view. A tap does not take the camera.
+    pub const TAP_SLOP: f32 = 6.0;
+    /// Time constant, s, with which a drag reaches the view. It spreads a touch sample
+    /// over the simulation ticks between two samples. The total turn is conserved.
+    pub const TOUCH_LAG: f32 = 0.022;
+    /// Limits of the eye's elevation, rad: 26 degrees up from below, 60 degrees down from above.
+    pub const ELEVATION_MIN: f32 = -0.45;
+    pub const ELEVATION_MAX: f32 = 1.05;
+
     /// A body that moves further than this in one tick, m, has been put somewhere: a cut.
     pub const CUT: f32 = 3.0;
 }
@@ -96,15 +109,30 @@ pub fn setup(w: &mut World) {
     present(w, Motion::default());
 }
 
-/// Read the canvas size. Call before `body::step`.
+/// Read the finger. Call before `body::step`.
+///
+/// A contact on the scene turns the view and the movement frame together. Control
+/// contacts (the move pad, the buttons) never appear here: the engine keeps them
+/// out of `Input::pointer`.
 pub fn input(w: &mut World, input: &Input) {
+    let drag = scene_drag(input);
     let viewport = input.viewport();
+    let dt = w.dt();
     let mut rig = w.resource_mut::<Rig>();
     if rig.viewport != viewport {
         // The host's first report is not a rotation of the phone: place, do not ease.
         rig.cut |= rig.viewport == Vec2::ZERO;
         rig.viewport = viewport;
     }
+    let turn = rig.look.drag(drag, dt);
+    if rig.inspect.is_some() && rig.look.travel > TAP_SLOP {
+        rig.inspect = None;
+        rig.cut = true;
+    }
+    rig.heading.frame = math::wrap_angle(rig.heading.frame + turn.x);
+    let base = Framing::framed(viewport).elevation;
+    rig.look
+        .tilt_by(turn.y, ELEVATION_MIN - base, ELEVATION_MAX - base);
 }
 
 /// The world direction of a stick vector. `body::step` calls it.
@@ -132,8 +160,8 @@ pub fn present(w: &mut World, _motion: Motion) {
 }
 
 /// The `camera <x> <y> <z>` debug command: hold the eye that far from the body's
-/// centre, looking at it. `Vec3::ZERO` returns to the rig. Movement stays relative
-/// to this view.
+/// centre, looking at it. `Vec3::ZERO`, or a drag on the scene, returns to the rig.
+/// Movement stays relative to this view.
 pub fn set_offset(w: &mut World, offset: Vec3) {
     let mut rig = w.resource_mut::<Rig>();
     rig.cut = true;
@@ -153,7 +181,7 @@ pub fn view(w: &World) -> View {
     let rig = w.resource::<Rig>();
     View {
         yaw: rig.heading.view(),
-        elevation: rig.framing.elevation,
+        elevation: rig.elevation(),
         boom: rig.framing.boom,
         shoulder: rig.framing.shoulder,
         fov: rig.framing.fov,
@@ -163,6 +191,7 @@ pub fn view(w: &World) -> View {
 /// All of the camera's state. Saved and hashed: a restore resumes the same camera.
 #[derive(Clone, Default, Resource)]
 struct Rig {
+    look: Look,
     heading: Heading,
     /// The eased framing, not its target.
     framing: Framing,
@@ -184,6 +213,9 @@ struct Shot {
 }
 
 impl Rig {
+    fn elevation(&self) -> f32 {
+        (self.framing.elevation + self.look.tilt).clamp(ELEVATION_MIN, ELEVATION_MAX)
+    }
     fn shoot(&mut self, centre: Vec3, dt: f32) -> Shot {
         let cut = std::mem::take(&mut self.cut) || centre.distance(self.centre) > CUT;
         self.centre = centre;
@@ -207,7 +239,7 @@ impl Rig {
             self.framing = target;
         }
         self.framing.ease(target, dt);
-        let basis = Basis::new(self.heading.view(), self.framing.elevation);
+        let basis = Basis::new(self.heading.view(), self.elevation());
         let anchor = centre
             + Vec3::Y * (self.framing.height - body::HALF)
             + basis.right() * self.framing.shoulder;
@@ -221,6 +253,68 @@ impl Rig {
             cut,
         }
     }
+}
+
+/// The player's hand on the view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
+struct Look {
+    /// Elevation the player added to the framing's, rad.
+    tilt: f32,
+    /// Turn the finger asked for that has not reached the view yet: (yaw, tilt), rad.
+    pending: Vec2,
+    /// Points this contact has travelled; zero with no contact.
+    travel: f32,
+}
+
+impl Look {
+    /// Take this tick's drag on the scene, in points. Returns the turn to apply
+    /// now: (yaw, tilt), rad.
+    fn drag(&mut self, drag: Option<Vec2>, dt: f32) -> Vec2 {
+        match drag {
+            Some(delta) => {
+                let moved = delta.length();
+                self.travel += moved;
+                if self.travel > TAP_SLOP {
+                    // Only the motion past the slop turns the view. The points
+                    // under it are dropped, so passing the slop is not a jump.
+                    let live = ((self.travel - TAP_SLOP) / moved).min(1.0);
+                    // Swipe right looks right; swipe down looks down.
+                    self.pending +=
+                        Vec2::new(-delta.x * YAW_PER_POINT, delta.y * TILT_PER_POINT) * live;
+                }
+            }
+            None => self.travel = 0.0,
+        }
+        let turn = if self.pending.length_squared() < 1e-10 {
+            self.pending
+        } else {
+            self.pending * (1.0 - math::exp(-dt / TOUCH_LAG))
+        };
+        self.pending -= turn;
+        turn
+    }
+    /// Add `by` to the tilt inside `[low, high]`. At a limit the pending tilt is
+    /// dropped, so a drag back leaves the limit at once.
+    fn tilt_by(&mut self, by: f32, low: f32, high: f32) {
+        let tilt = self.tilt + by;
+        self.tilt = tilt.clamp(low, high);
+        if self.tilt != tilt {
+            self.pending.y = 0.0;
+        }
+    }
+}
+
+/// This tick's motion, in points, of a contact on the scene: a finger, or a pressed
+/// mouse. A flick that goes down and up inside one tick counts. A hover and a
+/// cancelled contact do not.
+fn scene_drag(input: &Input) -> Option<Vec2> {
+    input
+        .pointer()
+        .filter(|p| {
+            p.press_origin.is_some()
+                && (p.down || input.pressed("orbit") || input.released("orbit"))
+        })
+        .map(|p| p.delta)
 }
 
 /// Where "stick up" points in the world, and how far the follow has turned the view
