@@ -54,3 +54,10 @@ test "The holdout opens with combat HUD"
   tap "arena"
   clock +100
   expect tree has "combat-hud"
+
+test "A race shows its clock and its checkpoints"
+  tap "play"
+  clock +100
+  expect tree has "checkpoints"
+  expect tree missing "combat-hud"
+  expect tree missing "finish"
