@@ -64,7 +64,7 @@ const SHIMMY_ACCEL: f32 = 6.0;
 /// Half the distance between hanging hands, and how far one hand moves in a
 /// shimmy step, metres.
 const HANDS: f32 = 0.2;
-const HAND_STEP: f32 = 0.3;
+const HAND_STEP: f32 = 0.28;
 
 /// A vault carries the capsule's centre, which is at the hips, this far above the
 /// wall's top, metres: an arm's length under the shoulder of a body that leans on
@@ -687,7 +687,6 @@ fn hang(w: &mut World, body: &mut Parkour, mut hanging: Hang, controls: &Control
         hanging.caught.lerp(hanging.ledge.hang(), hanging.settled());
     let motion = Motion {
         act: Act::Hang,
-        speed: hanging.speed.abs(),
         ..Motion::default()
     };
     (Action::Hang(hanging), motion, face)
@@ -716,7 +715,7 @@ fn grips(ledge: &Ledge, travel: f32) -> [Hold; 2] {
         // The first half of a cycle carries the hand; the second leaves it planted.
         let swing = ((cycle - whole) * 2.0).min(1.0);
         let along = side * HANDS + HAND_STEP * (whole + smooth(swing)) - travel;
-        let lift = 0.06 * math::sin(std::f32::consts::PI * swing);
+        let lift = 0.03 * math::sin(std::f32::consts::PI * swing);
         Hold::new(limb, over + ledge.left() * along + Vec3::Y * lift)
     };
     [
@@ -1037,9 +1036,18 @@ pub fn present(w: &mut World) {
         _ => {
             let holds = holds(w);
             hold::apply(w, &holds);
-            if let Action::Vault(path) = action {
-                let lifted = lifted(w, &path);
-                hold::apply(w, &lifted);
+            match action {
+                Action::Vault(path) => {
+                    let lifted = lifted(w, &path);
+                    hold::apply(w, &lifted);
+                }
+                // The legs of a body that shimmies trail behind it.
+                Action::Hang(hanging) if hanging.speed != 0.0 => {
+                    let trail = Quat::from_rotation_z(-0.22 * hanging.speed / SHIMMY);
+                    hold::turn(w, "thigh_l", trail);
+                    hold::turn(w, "thigh_r", trail);
+                }
+                _ => {}
             }
             return;
         }

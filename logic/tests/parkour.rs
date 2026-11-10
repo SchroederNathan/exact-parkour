@@ -457,6 +457,117 @@ fn a_short_hop_needs_no_recovery() {
     assert!(matches!(action(&game), Action::Ground), "{:?}", action(&game));
 }
 
+// Jump at the middle of `block`'s south face and hang from its edge. The stick
+// still pushes at the wall, as it does when a player runs and jumps at it.
+fn hang_from(game: &mut Game, block: &Block) {
+    approach(game, block, 0.0, 3.0, 0.35, false);
+    let hanging = run(game, 900.0, "hang", |g| matches!(action(g), Action::Hang(_)));
+    assert!(hanging, "no hang, doing {:?}", action(game));
+}
+
+// How far each wrist is from the point on the edge it holds.
+fn off_the_edge(game: &Game) -> [f32; 2] {
+    let holds = body::holds(game.world());
+    [0, 1].map(|i| (hold::joint(game.world(), holds[i].limb.chain()[2]) - holds[i].at).length())
+}
+
+#[test]
+fn a_body_that_jumps_to_an_edge_stays_on_it_until_a_new_push() {
+    let block = park::named("ledge-mid");
+    let (_, out) = south_face(block);
+    let mut game = start();
+    hang_from(&mut game, block);
+    // The stick is still forward from the run-up. That is not a wish to climb.
+    let left = run(&mut game, 2000.0, "stay", |g| !matches!(action(g), Action::Hang(_)));
+    assert!(!left, "left the edge, doing {:?}", action(&game));
+    // Let go of the stick and push forward again: now it climbs.
+    steer(&mut game, Vec3::ZERO);
+    run(&mut game, 100.0, "stay", |_| false);
+    steer(&mut game, -out);
+    let climbing = run(&mut game, 100.0, "push", |g| matches!(action(g), Action::Climb(_)));
+    assert!(climbing, "no climb, doing {:?}", action(&game));
+    let up = run(&mut game, 2500.0, "push", |g| matches!(action(g), Action::Ground));
+    assert!(up);
+    assert!((feet(&game).y - block.top()).abs() < 0.05, "feet at {}", feet(&game).y);
+}
+
+#[test]
+fn a_hanging_body_shimmies_along_the_edge_to_its_ends() {
+    let block = park::named("ledge-mid");
+    let (middle, out) = south_face(block);
+    // Along the edge to the left of a body that faces the wall.
+    let left = Vec3::Y.cross(-out);
+    let half = block.size[0] / 2.0;
+    let along = |p: Vec3| (p - middle).dot(left);
+    let mut game = start();
+    hang_from(&mut game, block);
+    steer(&mut game, Vec3::ZERO);
+    run(&mut game, 400.0, "settle", |_| false);
+    let level = centre(&game).y;
+
+    for (side, name) in [(1.0, "left"), (-1.0, "right")] {
+        let from = along(centre(&game));
+        steer(&mut game, left * side);
+        let what = format!("shimmy {name}");
+        let mut was = body::holds(game.world());
+        let mut wrists = was.clone().map_holds(&game);
+        let mut still = 0.0f32;
+        for tick in 0..900 {
+            game.run(TICK_MS);
+            check(&game, &what);
+            let Action::Hang(hanging) = action(&game) else {
+                panic!("{what}: left the edge, doing {:?}", action(&game));
+            };
+            // Level, flat against the wall, and both hands on the edge.
+            let at = centre(&game);
+            assert!((at.y - level).abs() < 1e-4, "{what}: rose or sank to {}", at.y);
+            for (i, off) in off_the_edge(&game).into_iter().enumerate() {
+                assert!(off < 0.01, "{what}: hand {i} is {off} m off the edge at tick {tick}");
+            }
+            // A hand that holds the same place on the edge does not move.
+            let now = body::holds(game.world());
+            let wrists_now = now.clone().map_holds(&game);
+            for i in 0..2 {
+                if (now[i].at - was[i].at).length() < 1e-5 {
+                    let slid = (wrists_now[i] - wrists[i]).length();
+                    assert!(slid < 0.004, "{what}: a planted hand slid {slid} m");
+                }
+                // Neither hand is ever past the end of the wall.
+                assert!(along(now[i].at).abs() < half, "{what}: a hand is off the wall's end");
+            }
+            (was, wrists) = (now, wrists_now);
+            still = if hanging.speed == 0.0 { still + 1.0 } else { 0.0 };
+            if tick > 60 && still > 30.0 {
+                break;
+            }
+        }
+        // It went as far as the wall goes, and stopped with its hands still on it.
+        let to = along(centre(&game));
+        assert!(still > 30.0, "{what}: never stopped");
+        assert!((to - from) * side > 1.0, "{what}: went {} m", (to - from) * side);
+        let short = half - to * side;
+        assert!((0.3..0.6).contains(&short), "{what}: stopped {short} m from the end");
+    }
+
+    // From anywhere on the edge, forward climbs.
+    steer(&mut game, -out);
+    let up = run(&mut game, 3000.0, "climb", |g| matches!(action(g), Action::Ground));
+    assert!(up, "doing {:?}", action(&game));
+    assert!((feet(&game).y - block.top()).abs() < 0.05);
+}
+
+// The wrists that go with a list of holds.
+trait Wrists {
+    fn map_holds(self, game: &Game) -> Vec<Vec3>;
+}
+impl Wrists for Vec<hold::Hold> {
+    fn map_holds(self, game: &Game) -> Vec<Vec3> {
+        self.iter()
+            .map(|h| hold::joint(game.world(), h.limb.chain()[2]))
+            .collect()
+    }
+}
+
 // The drawn body's bones as sampled points, each with its bone's name.
 const BONES: [(&str, &str); 13] = [
     ("hips", "spine"),

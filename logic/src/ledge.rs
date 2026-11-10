@@ -49,7 +49,7 @@ impl Ledge {
 
 /// How far the edge is above the feet of a body that hangs from it, metres: the
 /// shoulders are 1.44 m up, and the arms are a little short of straight.
-pub const HANG_REACH: f32 = 1.88;
+pub const HANG_REACH: f32 = 1.86;
 
 /// The same edge `side` metres to the left of where `ledge` meets it, for a body
 /// that hangs from it. `None` where the edge ends, turns or changes height.
