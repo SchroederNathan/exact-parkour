@@ -1,8 +1,8 @@
 use exact_game::*;
 use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
-pub mod body;
 pub mod arena;
+pub mod body;
 pub mod debug;
 pub mod gait;
 pub mod hold;
@@ -21,11 +21,12 @@ use locomotion::Stride;
 pub const PARK: f32 = 30.0;
 pub const RACE_MODE: u32 = 0;
 pub const ARENA_MODE: u32 = 1;
+const LEGACY_MODE: u32 = 2;
 
 #[derive(Default, Component)]
 pub struct Player;
 
-#[derive(Default, Args)]
+#[derive(Args)]
 pub struct Options {
     pub seed: u64,
     #[live]
@@ -36,6 +37,18 @@ pub struct Options {
     pub paused: bool,
     #[restart]
     pub restart: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            mode: LEGACY_MODE,
+            race: 0,
+            paused: false,
+            restart: false,
+        }
+    }
 }
 
 #[derive(Default, Data)]
@@ -61,7 +74,10 @@ impl Game for ExactBeatEmUp {
         Actions::new()
             .stick("move", Stick::wasd().or_arrows().or_pad(Pad::Left))
             .button("jump", &["Space", "GamepadSouth"])
-            .button("sprint", &["ShiftLeft", "ShiftRight", "GamepadL3", "GamepadR1"])
+            .button(
+                "sprint",
+                &["ShiftLeft", "ShiftRight", "GamepadL3", "GamepadR1"],
+            )
             .button("slide", &["KeyC", "ControlLeft", "GamepadEast"])
     }
 
@@ -123,8 +139,10 @@ impl Game for ExactBeatEmUp {
             );
         }
 
-        if args.mode == RACE_MODE {
+        if args.mode != ARENA_MODE {
             park::setup(w);
+        }
+        if args.mode == RACE_MODE {
             race::setup(w, args.race as u8);
         }
 

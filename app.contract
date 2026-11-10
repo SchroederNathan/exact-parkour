@@ -156,19 +156,19 @@ component ExactBeatEmUp
             button action="slide" id="slide" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="slide" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 border-radius=38 background-color="transparent" aria-label="Slide"
             button action="jump" id="jump" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="jump" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 border-radius=48 background-color="transparent" aria-label="Jump"
           if touch
-            button buttonStyle="glass" testId="move-face" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 pointer-events="none" aria-hidden=true
+            button appearance="none" testId="move-face" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width="7rem" height="7rem" pointer-events="none" aria-hidden=true
               text "Move"
-            button buttonStyle=(under == "sprint" ? "prominent-glass" : "glass") testId="sprint-face" position="absolute" right=sprintRight bottom=sprintBottom width=84 height=84 pointer-events="none" aria-hidden=true
+            button appearance="none" testId="sprint-face" position="absolute" right=sprintRight bottom=sprintBottom width="5.25rem" height="5.25rem" pointer-events="none" aria-hidden=true
               text "Sprint"
-            button buttonStyle=(under == "slide" ? "prominent-glass" : "glass") testId="slide-face" position="absolute" right=slideRight bottom=slideBottom width=76 height=76 pointer-events="none" aria-hidden=true
+            button appearance="none" testId="slide-face" position="absolute" right=slideRight bottom=slideBottom width="4.75rem" height="4.75rem" pointer-events="none" aria-hidden=true
               text "Slide"
-            button buttonStyle=(under == "jump" ? "prominent-glass" : "glass") testId="jump-face" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 pointer-events="none" aria-hidden=true
+            button appearance="none" testId="jump-face" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width="6rem" height="6rem" pointer-events="none" aria-hidden=true
               text "Jump"
       else
         column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=20
           text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
-          text "Pick a route or hold the rooftop against escalating hordes." max-width=380 text-align="center" color="#b8c8ce"
-          text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width=360 text-align="center" color="#b8c8ce"
+          text "Pick a route or hold the rooftop against escalating hordes." max-width="23.75rem" text-align="center" color="#b8c8ce"
+          text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width="22.5rem" text-align="center" color="#b8c8ce"
           row gap=12 flex-wrap="wrap" justify-content="center"
             button buttonStyle="filled" press=chooseRace0 autofocus aria-label="Skyline Sprint" testId="play"
               text "Skyline Sprint"

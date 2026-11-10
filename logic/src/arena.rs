@@ -1,5 +1,5 @@
-use exact_game::*;
 use crate::body;
+use exact_game::*;
 
 const ROUND_GAP: f32 = 1.1;
 const RAISE_SECONDS: f32 = 0.35;
@@ -87,7 +87,9 @@ fn round_count(round: u32) -> u32 {
     ROUND_COUNTS
         .get(round.saturating_sub(1) as usize)
         .copied()
-        .unwrap_or_else(|| ROUND_COUNTS.last().copied().unwrap_or(4) + (round.saturating_sub(4) * 2))
+        .unwrap_or_else(|| {
+            ROUND_COUNTS.last().copied().unwrap_or(4) + (round.saturating_sub(4) * 2)
+        })
 }
 
 fn spawn_round(w: &mut World, round: u32) {
@@ -95,7 +97,11 @@ fn spawn_round(w: &mut World, round: u32) {
     let radius = 10.5 + (round as f32 * 0.45).min(4.0);
     for index in 0..count {
         let angle = (index as f32 / count as f32) * std::f32::consts::TAU + round as f32 * 0.37;
-        let at = Vec3::new(math::sin(angle) * radius, body::HALF, math::cos(angle) * radius);
+        let at = Vec3::new(
+            math::sin(angle) * radius,
+            body::HALF,
+            math::cos(angle) * radius,
+        );
         let serial = w.resource::<CombatState>().serial + index;
         w.spawn_named(
             format!("enemy-{serial}"),
@@ -141,7 +147,11 @@ pub fn tick(w: &mut World) {
 
 fn advance_enemies(w: &mut World, dt: f32, now: u64) {
     let player = w.require::<Transform>("player").position;
-    let entities: Vec<Entity> = w.query::<(&Transform, &Enemy)>().iter().map(|(e, _)| e).collect();
+    let entities: Vec<Entity> = w
+        .query::<(&Transform, &Enemy)>()
+        .iter()
+        .map(|(e, _)| e)
+        .collect();
     for entity in entities {
         let mut pose = w.require_mut::<Transform>(entity);
         let delta = Vec3::new(player.x - pose.position.x, 0.0, player.z - pose.position.z);
@@ -149,7 +159,9 @@ fn advance_enemies(w: &mut World, dt: f32, now: u64) {
         if distance > CONTACT_DISTANCE {
             let step = delta.normalize_or_zero() * ENEMY_SPEED * dt;
             pose.position += step;
-            pose.rotation = pose.looking_at(Vec3::new(player.x, pose.position.y, player.z), Vec3::Y).rotation;
+            pose.rotation = pose
+                .looking_at(Vec3::new(player.x, pose.position.y, player.z), Vec3::Y)
+                .rotation;
         }
         let _ = (distance, now);
     }
@@ -160,7 +172,9 @@ fn apply_contacts(w: &mut World, now: u64) {
     let hits: Vec<Entity> = w
         .query::<(&Transform, &Enemy)>()
         .iter()
-        .filter(|(_, (pose, enemy))| pose.position.distance(player) < CONTACT_DISTANCE && enemy.next_contact <= now)
+        .filter(|(_, (pose, enemy))| {
+            pose.position.distance(player) < CONTACT_DISTANCE && enemy.next_contact <= now
+        })
         .map(|(e, _)| e)
         .collect();
     if hits.is_empty() {
@@ -182,7 +196,12 @@ fn apply_contacts(w: &mut World, now: u64) {
 fn advance_weapons(w: &mut World, dt: f32, now: u64) {
     let (phase, raise, fire_timer, round_timer) = {
         let state = w.resource::<CombatState>();
-        (state.phase, state.raise, state.fire_timer, state.round_timer)
+        (
+            state.phase,
+            state.raise,
+            state.fire_timer,
+            state.round_timer,
+        )
     };
     match phase {
         CombatPhase::Raising => {
@@ -233,7 +252,10 @@ fn nearest_enemy(w: &World, origin: Vec3) -> Option<(Entity, Vec3)> {
     w.query::<(&Transform, &Enemy)>()
         .iter()
         .map(|(entity, (pose, _))| (entity, pose.position))
-        .min_by(|(_, a), (_, b)| a.distance_squared(origin).total_cmp(&b.distance_squared(origin)))
+        .min_by(|(_, a), (_, b)| {
+            a.distance_squared(origin)
+                .total_cmp(&b.distance_squared(origin))
+        })
 }
 
 fn fire(w: &mut World, now: u64) {
@@ -248,14 +270,26 @@ fn fire(w: &mut World, now: u64) {
     let distance = muzzle.distance(target_position).max(0.1);
     let dir = (target_position - muzzle).normalize_or_zero();
     w.spawn((
-        Transform::at((muzzle.x + target_position.x) * 0.5, (muzzle.y + target_position.y) * 0.5, (muzzle.z + target_position.z) * 0.5)
-            .looking_at(target_position, Vec3::Y),
+        Transform::at(
+            (muzzle.x + target_position.x) * 0.5,
+            (muzzle.y + target_position.y) * 0.5,
+            (muzzle.z + target_position.z) * 0.5,
+        )
+        .looking_at(target_position, Vec3::Y),
         Mesh::cuboid(Vec3::new(0.045, 0.045, distance)),
-        Material::glow(if left { [1.0, 0.76, 0.18] } else { [0.24, 0.82, 1.0] }),
+        Material::glow(if left {
+            [1.0, 0.76, 0.18]
+        } else {
+            [0.24, 0.82, 1.0]
+        }),
         Tracer { spawned: now },
     ));
     w.spawn((
-        Transform::at(muzzle.x + dir.x * 0.18, muzzle.y + dir.y * 0.18, muzzle.z + dir.z * 0.18),
+        Transform::at(
+            muzzle.x + dir.x * 0.18,
+            muzzle.y + dir.y * 0.18,
+            muzzle.z + dir.z * 0.18,
+        ),
         Mesh::sphere(0.11),
         Material::glow([1.0, 0.65, 0.12]),
         MuzzleFlash { until: now + 5 },
@@ -302,8 +336,20 @@ fn cleanup_tracers(w: &mut World, now: u64) {
 
 fn publish(w: &mut World) {
     let state = w.resource::<CombatState>();
-    w.publish("round", state.round);
-    w.publish("enemies", state.remaining);
-    w.publish("hits", state.player_hits);
-    w.publish("phase", format!("{:?}", state.phase));
+    let round = state.round;
+    let enemies = state.remaining;
+    let hits = state.player_hits as u32;
+    let phase = format!("{:?}", state.phase);
+    drop(state);
+    w.publish_record(&crate::Hud {
+        mode: "arena".into(),
+        race: "Rooftop Holdout".into(),
+        subtitle: "Dual pistols".into(),
+        seconds: 0.0,
+        finished: false,
+        round,
+        enemies,
+        hits,
+        phase,
+    });
 }
