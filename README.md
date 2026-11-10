@@ -11,7 +11,13 @@ Rooftop Rumble is a small Exact game prototype. An articulated wooden mannequin 
 | Jump, vault, climb | Space | South button | Jump |
 | Slide | C or Left Control | East button | Slide |
 
-The low third-person camera turns smoothly behind your direction of travel. Swipe or click-drag the scene to look around; drag vertically to tilt it. Automatic following waits briefly after a swipe and resumes when moving. A fresh movement direction uses the camera's frame, while holding that direction keeps your path steady as the camera catches up. The camera sways slightly while running, bumps on landings, and pulls in before hitting walls. The movement stick and action buttons can be held while another finger pans the scene.
+The camera is behind the runner's right shoulder, at eye height. The runner stands left of the screen centre, clear of the move pad and the buttons. Portrait and landscape each have their own framing, and a rotated phone eases from one to the other.
+
+Swipe or click-drag the scene to look around. A drag of the same length always turns the view by the same angle. The first 6 points of a touch do not turn the view, so a tap does not take the camera. The move pad and the action buttons can be held while another finger pans the scene.
+
+The view turns behind your direction of travel while the stick is pushed. After a swipe the view stays yours for one second, then the follow returns gently. A held stick direction keeps a straight path while the view turns. A stick that moves more than 15 degrees is read against the screen again. A swipe turns the path of a held stick with the view.
+
+The camera trails the runner a little at speed and widens its view in a sprint. It stays almost still in a jump, tilts down in a fall, lowers in a slide and looks down on a hang from behind. Next to a wall it moves in behind the runner, and it shortens before the lens can enter a wall. A slow handheld drift, a nod with each footfall and a short rattle on a hard landing turn the view. They never move it. Every number is in `camera::tune` in `logic/src/camera.rs`.
 
 Desktop and web keep the playfield clear. Coarse-pointer devices show a circular move pad, round Sprint, Slide and Jump buttons, and a Pause button. The controls have translucent backgrounds and visible outlines. The move pad's thumb follows the actual analog input, stays inside its circular range, and recenters when released. On a screen under 600 points wide the three round buttons stand in a column. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
 
@@ -70,7 +76,7 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 48 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 79 hostless tests and the determinism lints.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
