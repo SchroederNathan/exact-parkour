@@ -94,6 +94,24 @@ fn yaw(sim: &Game) -> f32 {
     camera::view(sim.world()).yaw
 }
 
+// The way a view of this yaw looks, level.
+fn ahead(yaw: f32) -> Vec3 {
+    Quat::from_rotation_y(yaw) * -Vec3::Z
+}
+
+// A thumb on the move pad, `x` to the right and `z` down the screen, of a full push.
+fn stick(sim: &mut Game, phase: PointerPhase, x: f32, z: f32) {
+    sim.input(InputEvent::Control {
+        name: "move".into(),
+        id: 1,
+        phase,
+        x: 100.0 + 60.0 * x,
+        y: 100.0 + 60.0 * z,
+        at_ms: 0.0,
+        player: 0,
+    });
+}
+
 // A finger on the scene. A touch contact reports no mouse button.
 fn touch(sim: &mut Game, phase: PointerPhase, dx: f32, dy: f32) {
     sim.input(InputEvent::Pointer {
@@ -242,9 +260,21 @@ fn a_tap_does_not_take_the_view_and_passing_the_slop_does_not_jump() {
     drag(&mut sim, tune::TAP_SLOP - 1.0, 0.0, 2);
     sim.run(500.0);
     assert_eq!(yaw(&sim), 0.0, "a tap turned the view");
+    sim.key_down("KeyD");
+    sim.run(300.0);
+    drag(&mut sim, tune::TAP_SLOP - 1.0, 0.0, 2);
+    let tapped = yaw(&sim);
+    sim.run(200.0);
+    assert!(
+        (yaw(&sim) - tapped).abs() > 0.05,
+        "a tap stopped the follow"
+    );
+    sim.key_up("KeyD");
+    sim.run(1000.0);
 
     touch(&mut sim, PointerPhase::Down, 0.0, 0.0);
-    let mut before = yaw(&sim);
+    let from = yaw(&sim);
+    let mut before = from;
     for _ in 0..40 {
         slide(&mut sim, 1.0, 0.0, 1);
         let now = yaw(&sim);
@@ -256,10 +286,10 @@ fn a_tap_does_not_take_the_view_and_passing_the_slop_does_not_jump() {
         before = now;
     }
     sim.run(500.0);
+    let turned = math::wrap_angle(yaw(&sim) - from);
     assert!(
-        (yaw(&sim) + (40.0 - tune::TAP_SLOP) * tune::YAW_PER_POINT).abs() < 1e-4,
-        "the points under the slop are dropped: {}",
-        yaw(&sim)
+        (turned + (40.0 - tune::TAP_SLOP) * tune::YAW_PER_POINT).abs() < 1e-4,
+        "the points under the slop are dropped: {turned}"
     );
 }
 
@@ -270,17 +300,8 @@ fn hover_and_action_controls_do_not_turn_but_a_second_finger_can() {
     sim.run(100.0);
     assert_eq!(yaw(&sim), 0.0, "a hover turned the view");
 
-    for (phase, x) in [(PointerPhase::Down, 40.0), (PointerPhase::Move, 400.0)] {
-        sim.input(InputEvent::Control {
-            name: "move".into(),
-            id: 1,
-            phase,
-            x,
-            y: 40.0,
-            at_ms: 0.0,
-            player: 0,
-        });
-    }
+    stick(&mut sim, PointerPhase::Down, 0.0, 0.0);
+    stick(&mut sim, PointerPhase::Move, 1.0, 0.0);
     sim.run(TICK_MS);
     assert_eq!(yaw(&sim), 0.0, "a finger on the move pad turned the view");
     let from = yaw(&sim);
@@ -412,5 +433,173 @@ fn the_debug_camera_command_holds_a_fixed_offset_until_a_drag() {
     assert!(
         right < LANDSCAPE.x / 2.0,
         "a drag gives the camera back to the rig"
+    );
+}
+
+#[test]
+fn a_held_stick_keeps_a_straight_path_while_the_view_swings_behind() {
+    for (key, direction) in [
+        ("KeyW", -Vec3::Z),
+        ("KeyS", Vec3::Z),
+        ("KeyA", -Vec3::X),
+        ("KeyD", Vec3::X),
+    ] {
+        let mut sim = start();
+        let from = feet(&sim);
+        sim.key_down(key);
+        let mut before = yaw(&sim);
+        for _ in 0..360 {
+            sim.run(TICK_MS);
+            let now = yaw(&sim);
+            assert!(
+                math::wrap_angle(now - before).abs() <= tune::FOLLOW_RATE_MAX / 120.0 * 1.01,
+                "{key}: the view snapped"
+            );
+            before = now;
+        }
+        let walked = (feet(&sim) - from) * Vec3::new(1.0, 0.0, 1.0);
+        assert!(walked.dot(direction) > 6.0, "{key}: {walked}");
+        assert!(
+            walked.cross(direction).length() < 0.01,
+            "{key}: the path curved: {walked}"
+        );
+        assert!(
+            ahead(before).dot(direction) > 8.0f32.to_radians().cos(),
+            "{key}: the view looks along {}",
+            ahead(before)
+        );
+    }
+}
+
+#[test]
+fn the_follow_turns_without_a_step_and_does_not_pass_the_travel() {
+    let mut sim = start();
+    let behind_the_run = -std::f32::consts::FRAC_PI_2;
+    let (mut before, mut rate) = (yaw(&sim), 0.0);
+    let mut turn = |sim: &mut Game, what: &str| {
+        sim.run(TICK_MS);
+        let now = yaw(sim);
+        let moved = math::wrap_angle(now - before);
+        assert!(
+            (moved - rate).abs() <= tune::FOLLOW_ACCEL / (120.0 * 120.0) * 1.05,
+            "{what}: the turn rate stepped from {rate} to {moved} rad per tick"
+        );
+        (before, rate) = (now, moved);
+        now
+    };
+    sim.key_down("KeyD");
+    for _ in 0..300 {
+        let now = turn(&mut sim, "running");
+        assert!(now > behind_the_run - 1e-3, "the view passed the travel: {now}");
+    }
+    sim.key_up("KeyD");
+    sim.key_down("KeyA");
+    for _ in 0..120 {
+        turn(&mut sim, "turning back");
+    }
+    sim.key_up("KeyA");
+    for _ in 0..120 {
+        turn(&mut sim, "stopping");
+    }
+}
+
+#[test]
+fn the_view_rests_when_the_stick_is_released() {
+    let mut sim = start();
+    sim.hold("KeyD", 400.0);
+    sim.run(400.0);
+    let resting = yaw(&sim);
+    assert!(
+        resting < -0.05 && resting > -1.2,
+        "the view was part of the way behind the run: {resting}"
+    );
+    sim.run(2000.0);
+    assert_eq!(yaw(&sim), resting, "the view moved with the stick at rest");
+}
+
+#[test]
+fn a_wobbling_thumb_keeps_the_line() {
+    let mut sim = start();
+    let from = feet(&sim);
+    stick(&mut sim, PointerPhase::Down, 0.0, 0.0);
+    for tick in 0..360 {
+        let seconds = tick as f32 / 120.0;
+        let wobble = 6.0f32.to_radians() * (std::f32::consts::TAU * 2.0 * seconds).sin();
+        stick(&mut sim, PointerPhase::Move, wobble.cos(), wobble.sin());
+        sim.run(TICK_MS);
+        let walked = feet(&sim) - from;
+        assert!(
+            walked.z.abs() < 0.1,
+            "the path left its line after {seconds} s: {walked}"
+        );
+    }
+    assert!(feet(&sim).x - from.x > 6.0);
+    assert!(
+        ahead(yaw(&sim)).dot(Vec3::X) > 0.9,
+        "the view swung behind the run"
+    );
+}
+
+#[test]
+fn a_new_direction_is_read_against_the_screen() {
+    let mut sim = start();
+    sim.hold("KeyD", 2500.0);
+    sim.key_down("KeyW");
+    let view = ahead(yaw(&sim));
+    assert!(view.dot(Vec3::X) > 0.9, "the view is behind the run: {view}");
+    sim.run(200.0);
+    let from = feet(&sim);
+    sim.run(500.0);
+    let walked = (feet(&sim) - from).normalize();
+    assert!(
+        walked.dot(view) > 0.999,
+        "forward went {walked}, and the view looks {view}"
+    );
+}
+
+#[test]
+fn a_finger_owns_the_view_then_the_follow_eases_back() {
+    let mut sim = start();
+    sim.key_down("KeyD");
+    sim.run(450.0);
+    touch(&mut sim, PointerPhase::Down, 0.0, 0.0);
+    slide(&mut sim, 120.0, 0.0, 4);
+    sim.run(500.0);
+    let manual = yaw(&sim);
+    sim.run(1000.0);
+    assert_eq!(yaw(&sim), manual, "a held finger owns the view");
+    touch(&mut sim, PointerPhase::Up, 0.0, 0.0);
+    sim.run(f64::from(tune::LOOK_HOLD) * 1000.0 - 50.0);
+    assert_eq!(yaw(&sim), manual, "the view is the player's after the release");
+    sim.run(2500.0);
+    let from = feet(&sim);
+    sim.run(500.0);
+    let travel = ((feet(&sim) - from) * Vec3::new(1.0, 0.0, 1.0)).normalize();
+    assert!(
+        ahead(yaw(&sim)).dot(travel) > 8.0f32.to_radians().cos(),
+        "the follow did not come back behind the run"
+    );
+}
+
+#[test]
+fn tilt_goes_home_only_while_moving() {
+    let mut sim = start();
+    let elevation = |sim: &Game| camera::view(sim.world()).elevation;
+    let level = elevation(&sim);
+    drag(&mut sim, 0.0, 100.0, 10);
+    sim.run(500.0);
+    let tilted = elevation(&sim);
+    assert!(tilted > level + 0.2);
+    sim.run(3000.0);
+    assert_eq!(
+        elevation(&sim),
+        tilted,
+        "a player who stands and looks keeps the view"
+    );
+    sim.hold("KeyW", 6000.0);
+    assert!(
+        (elevation(&sim) - level).abs() < 0.02,
+        "the tilt stayed at {} during a run",
+        elevation(&sim)
     );
 }

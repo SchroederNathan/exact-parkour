@@ -5,13 +5,16 @@
 //! at the body. Five numbers place the eye (`Framing`). Two authored framings, one for
 //! portrait and one for landscape, are blended by the canvas aspect.
 //!
-//! The view yaw is never stored. It is `Heading::frame + Heading::swing`, and
-//! movement reads `frame` alone.
+//! Two actors turn the view, and each one owns its own number. The player's finger
+//! writes `Heading::frame`. The automatic follow writes `Heading::swing`. The view
+//! yaw is never stored: it is `frame + swing`. Movement reads `frame` alone, so the
+//! follow cannot bend a held stick.
 //!
 //! Call `input` before `body::step` and `present` last in the tick.
 use exact_game::*;
 
-use crate::body::{self, Motion};
+use crate::body::{self, Action, Motion, Parkour};
+use crate::gait::{RUN, SPRINT};
 
 /// Every tuning number of the camera, with its unit. Tests read these, so a retune
 /// does not break a test that states a relation.
@@ -63,6 +66,39 @@ pub mod tune {
     /// Limits of the eye's elevation, rad: 26 degrees up from below, 60 degrees down from above.
     pub const ELEVATION_MIN: f32 = -0.45;
     pub const ELEVATION_MAX: f32 = 1.05;
+    /// Seconds after the finger lifts in which the automatic follow stays off.
+    pub const LOOK_HOLD: f32 = 1.0;
+    /// Seconds in which the follow's authority returns from 0 to 1 after `LOOK_HOLD`.
+    pub const HANDBACK: f32 = 0.6;
+    /// Time constant, s, with which the player's tilt returns to the framing's while moving.
+    pub const TILT_RETURN: f32 = 0.9;
+
+    /// A stick direction inside this angle of the one the frame was read under, rad
+    /// (15 degrees), steers by its own change and keeps the frame. Outside it the
+    /// stick is read against the screen again.
+    pub const RELATCH_CONE: f32 = 0.26;
+
+    /// Planar speed, m/s, under which the view does not turn behind the travel.
+    pub const FOLLOW_SPEED: f32 = 0.8;
+    /// Time constant, s, of the turn at a run and at a sprint.
+    pub const FOLLOW_TIME_RUN: f32 = 0.45;
+    pub const FOLLOW_TIME_SPRINT: f32 = 0.32;
+    /// Fastest automatic turn, rad/s (160 degrees/s), and its acceleration, rad/s².
+    pub const FOLLOW_RATE_MAX: f32 = 2.8;
+    pub const FOLLOW_ACCEL: f32 = 10.0;
+    /// An error larger than this, rad, is a reversal: the view always swings the
+    /// `REVERSAL_WAY` (-1: clockwise from above, the eye passes on its own shoulder's side).
+    pub const REVERSAL: f32 = 2.8;
+    pub const REVERSAL_WAY: f32 = -1.0;
+    // The rate can always fall as fast as the proportional target falls, so the
+    // turn never passes its target.
+    const _: () = assert!(FOLLOW_ACCEL > FOLLOW_RATE_MAX / FOLLOW_TIME_SPRINT);
+    /// A hang turns the view this far along the wall, rad, at full shimmy speed or
+    /// a full lean.
+    pub const HANG_PEEK: f32 = 0.30;
+
+    /// Time constant, s, of the camera's estimate of the body's velocity.
+    pub const VELOCITY_LAG: f32 = 0.10;
 
     /// A body that moves further than this in one tick, m, has been put somewhere: a cut.
     pub const CUT: f32 = 3.0;
@@ -92,6 +128,10 @@ pub fn register(w: &mut World) {
 /// Spawn the camera behind the player's right shoulder. The player must exist.
 pub fn setup(w: &mut World) {
     w.insert_resource(Rig {
+        follow: Follow {
+            authority: 1.0,
+            ..Follow::default()
+        },
         cut: true,
         ..Rig::default()
     });
@@ -109,13 +149,19 @@ pub fn setup(w: &mut World) {
     present(w, Motion::default());
 }
 
-/// Read the finger. Call before `body::step`.
+/// Read the finger and the stick. Call before `body::step`.
 ///
 /// A contact on the scene turns the view and the movement frame together. Control
 /// contacts (the move pad, the buttons) never appear here: the engine keeps them
 /// out of `Input::pointer`.
 pub fn input(w: &mut World, input: &Input) {
     let drag = scene_drag(input);
+    let stick = input.stick_xz("move");
+    let direction = if stick.length_squared() > 1e-4 {
+        stick.normalize()
+    } else {
+        Vec3::ZERO
+    };
     let viewport = input.viewport();
     let dt = w.dt();
     let mut rig = w.resource_mut::<Rig>();
@@ -124,6 +170,7 @@ pub fn input(w: &mut World, input: &Input) {
         rig.cut |= rig.viewport == Vec2::ZERO;
         rig.viewport = viewport;
     }
+    rig.heading.latch(direction);
     let turn = rig.look.drag(drag, dt);
     if rig.inspect.is_some() && rig.look.travel > TAP_SLOP {
         rig.inspect = None;
@@ -136,16 +183,18 @@ pub fn input(w: &mut World, input: &Input) {
 }
 
 /// The world direction of a stick vector. `body::step` calls it.
+///
+/// It uses the movement frame, which the automatic follow never turns.
 pub fn movement(w: &World, stick: Vec3) -> Vec3 {
     Quat::from_rotation_y(w.resource::<Rig>().heading.frame) * stick
 }
 
 /// Follow the body and write the camera's `Transform` and field of view. Call last
 /// in the tick, after `body::present`.
-pub fn present(w: &mut World, _motion: Motion) {
+pub fn present(w: &mut World, motion: Motion) {
     let dt = w.dt();
-    let centre = w.require::<Transform>("player").position;
-    let shot = w.resource_mut::<Rig>().shoot(centre, dt);
+    let subject = Subject::read(w, motion);
+    let shot = w.resource_mut::<Rig>().shoot(&subject, dt);
     let camera = w.named("camera").expect("camera::setup spawns the camera");
     if shot.cut {
         // A cut must not be interpolated by the renderer.
@@ -193,10 +242,10 @@ pub fn view(w: &World) -> View {
 struct Rig {
     look: Look,
     heading: Heading,
+    follow: Follow,
+    track: Track,
     /// The eased framing, not its target.
     framing: Framing,
-    /// The body's centre last tick, m.
-    centre: Vec3,
     /// Canvas size in points as `input` last saw it; zero before the host reports one.
     viewport: Vec2,
     /// The next `present` places the rig instead of easing it.
@@ -216,9 +265,22 @@ impl Rig {
     fn elevation(&self) -> f32 {
         (self.framing.elevation + self.look.tilt).clamp(ELEVATION_MIN, ELEVATION_MAX)
     }
-    fn shoot(&mut self, centre: Vec3, dt: f32) -> Shot {
-        let cut = std::mem::take(&mut self.cut) || centre.distance(self.centre) > CUT;
-        self.centre = centre;
+    /// Snap everything that lags to where it is going. Keeps the heading and the tilt.
+    fn place(&mut self, subject: &Subject) {
+        self.framing = Framing::framed(self.viewport);
+        self.track = Track {
+            centre: subject.centre,
+            velocity: Vec3::ZERO,
+        };
+        self.follow.rate = 0.0;
+    }
+    fn shoot(&mut self, subject: &Subject, dt: f32) -> Shot {
+        let cut =
+            std::mem::take(&mut self.cut) || subject.centre.distance(self.track.centre) > CUT;
+        if cut {
+            self.place(subject);
+        }
+        self.track.step(subject.centre, dt);
         if let Some(offset) = self.inspect {
             let basis = Basis::new(
                 math::atan2(offset.x, offset.z),
@@ -226,7 +288,7 @@ impl Rig {
             );
             return Shot {
                 pose: Transform {
-                    position: centre + offset,
+                    position: subject.centre + offset,
                     rotation: basis.rotation(),
                     ..Transform::default()
                 },
@@ -234,13 +296,16 @@ impl Rig {
                 cut,
             };
         }
-        let target = Framing::framed(self.viewport);
-        if cut {
-            self.framing = target;
-        }
-        self.framing.ease(target, dt);
+        let pace = self.track.velocity.xz().length();
+        let want = subject
+            .stance
+            .behind(self.track.velocity, self.heading.pushing());
+        self.follow
+            .step(&mut self.heading, want, self.look.owns(), pace, dt);
+        self.look.settle(want.is_some(), self.follow.authority, dt);
+        self.framing.ease(Framing::framed(self.viewport), dt);
         let basis = Basis::new(self.heading.view(), self.elevation());
-        let anchor = centre
+        let anchor = subject.centre
             + Vec3::Y * (self.framing.height - body::HALF)
             + basis.right() * self.framing.shoulder;
         Shot {
@@ -255,7 +320,8 @@ impl Rig {
     }
 }
 
-/// The player's hand on the view.
+/// The player's hand on the view. Only `input` writes it, except that `settle`
+/// lets the tilt go home.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
 struct Look {
     /// Elevation the player added to the framing's, rad.
@@ -264,9 +330,16 @@ struct Look {
     pending: Vec2,
     /// Points this contact has travelled; zero with no contact.
     travel: f32,
+    /// Seconds the view still belongs to the player. `LOOK_HOLD` while a finger turns it.
+    hold: f32,
 }
 
 impl Look {
+    /// Whether the player owns the view: a finger turns it, or it lifted less than
+    /// `LOOK_HOLD` ago.
+    fn owns(&self) -> bool {
+        self.hold > 0.0
+    }
     /// Take this tick's drag on the scene, in points. Returns the turn to apply
     /// now: (yaw, tilt), rad.
     fn drag(&mut self, drag: Option<Vec2>, dt: f32) -> Vec2 {
@@ -281,9 +354,13 @@ impl Look {
                     // Swipe right looks right; swipe down looks down.
                     self.pending +=
                         Vec2::new(-delta.x * YAW_PER_POINT, delta.y * TILT_PER_POINT) * live;
+                    self.hold = LOOK_HOLD;
                 }
             }
-            None => self.travel = 0.0,
+            None => {
+                self.travel = 0.0;
+                self.hold = (self.hold - dt).max(0.0);
+            }
         }
         let turn = if self.pending.length_squared() < 1e-10 {
             self.pending
@@ -302,6 +379,14 @@ impl Look {
             self.pending.y = 0.0;
         }
     }
+    /// Let the tilt return to the framing's while the follow has a target, as far
+    /// as the follow has authority.
+    fn settle(&mut self, following: bool, authority: f32, dt: f32) {
+        if following {
+            let home = math::ease(self.tilt, 0.0, TILT_RETURN, dt);
+            self.tilt = math::lerp(self.tilt, home, authority);
+        }
+    }
 }
 
 /// This tick's motion, in points, of a contact on the scene: a finger, or a pressed
@@ -318,12 +403,12 @@ fn scene_drag(input: &Input) -> Option<Vec2> {
 }
 
 /// Where "stick up" points in the world, and how far the follow has turned the view
-/// away from it.
+/// away from it. The view yaw is never stored: it is `frame + swing`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
 struct Heading {
-    /// Yaw of the movement frame, rad.
+    /// Yaw of the movement frame, rad. `input` writes it: a drag, or a latch.
     frame: f32,
-    /// Yaw the follow has added, rad.
+    /// Yaw the follow has added, rad. Only `Follow::step` and `latch` write it.
     swing: f32,
     /// Unit stick direction the frame was last read under; zero with the stick at rest.
     anchor: Vec3,
@@ -332,6 +417,161 @@ struct Heading {
 impl Heading {
     fn view(&self) -> f32 {
         math::wrap_angle(self.frame + self.swing)
+    }
+    fn pushing(&self) -> bool {
+        self.anchor != Vec3::ZERO
+    }
+    /// Read the stick against the screen again when it rests, starts a push, or
+    /// leaves `RELATCH_CONE` of the direction it was read under. Otherwise keep the
+    /// frame: a held direction keeps a straight path while the view swings.
+    fn latch(&mut self, direction: Vec3) {
+        let outside = direction.dot(self.anchor) < math::cos(RELATCH_CONE);
+        if direction == Vec3::ZERO || self.anchor == Vec3::ZERO || outside {
+            self.frame = self.view();
+            self.swing = 0.0;
+            self.anchor = direction;
+        }
+    }
+}
+
+/// The automatic turn behind the travel. It writes `Heading::swing` and nothing else.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
+struct Follow {
+    /// Present turn rate, rad/s. It changes by at most `FOLLOW_ACCEL` per second,
+    /// so the turn starts and stops gently.
+    rate: f32,
+    /// How much of the follow is in force, 0 to 1: 0 while the player owns the view,
+    /// then up over `HANDBACK`.
+    authority: f32,
+}
+
+impl Follow {
+    /// Turn the view toward `want` (a view yaw, rad), or coast to rest without one.
+    fn step(&mut self, heading: &mut Heading, want: Option<f32>, owned: bool, pace: f32, dt: f32) {
+        if owned {
+            self.rate = 0.0;
+            self.authority = 0.0;
+            return;
+        }
+        self.authority = (self.authority + dt / HANDBACK).min(1.0);
+        let error = want.map(|yaw| {
+            let error = math::wrap_angle(yaw - heading.view());
+            // Near half a turn the shorter way flips with noise: always go one way.
+            if error.abs() > REVERSAL && error * REVERSAL_WAY < 0.0 {
+                error + std::f32::consts::TAU * REVERSAL_WAY
+            } else {
+                error
+            }
+        });
+        let time = math::lerp(
+            FOLLOW_TIME_RUN,
+            FOLLOW_TIME_SPRINT,
+            math::smoothstep(RUN, SPRINT, pace),
+        );
+        let wish = error.map_or(0.0, |e| {
+            (e / time).clamp(-FOLLOW_RATE_MAX, FOLLOW_RATE_MAX)
+        }) * self.authority;
+        self.rate += (wish - self.rate).clamp(-FOLLOW_ACCEL * dt, FOLLOW_ACCEL * dt);
+        let mut step = self.rate * dt;
+        if let Some(error) = error {
+            if step * error > 0.0 && step.abs() > error.abs() {
+                step = error;
+                self.rate = 0.0;
+            }
+        }
+        heading.swing = math::wrap_angle(heading.swing + step);
+    }
+}
+
+/// What the body is doing, as far as the camera frames it differently. The camera's
+/// only knowledge of `body::Action`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Stance {
+    /// On the ground or on a scripted course: run, vault, climb, roll, land, late rise.
+    Feet,
+    /// In the air. `fall` is the downward speed, m/s, zero while rising.
+    Air { fall: f32 },
+    Slide,
+    /// Hanging from an edge. `facing` is the yaw of the way into the wall, rad
+    /// (zero faces +Z, as `Parkour::yaw`). `along` is the shimmy speed over
+    /// `body::SHIMMY` plus the lean past the edge's end, -1 to 1, left positive.
+    Hang { facing: f32, along: f32 },
+    /// The ragdoll has the body, or it has only begun to rise.
+    Limp,
+}
+
+impl Stance {
+    fn of(parkour: &Parkour, motion: &Motion) -> Stance {
+        match &parkour.action {
+            Action::Ground
+            | Action::Vault(_)
+            | Action::Climb(_)
+            | Action::Roll { .. }
+            | Action::Land { .. } => Stance::Feet,
+            Action::Air => Stance::Air {
+                fall: (-motion.rising).max(0.0),
+            },
+            Action::Slide { .. } => Stance::Slide,
+            Action::Hang(hang) => {
+                let inward = hang.ledge.inward();
+                Stance::Hang {
+                    facing: math::atan2(inward.x, inward.z),
+                    along: (hang.speed / body::SHIMMY + hang.lean).clamp(-1.0, 1.0),
+                }
+            }
+            Action::Ragdoll => Stance::Limp,
+            Action::Rise { .. } if motion.progress < 0.5 => Stance::Limp,
+            Action::Rise { .. } => Stance::Feet,
+        }
+    }
+    /// The view yaw the follow wants, if this stance gives it one.
+    fn behind(self, velocity: Vec3, pushing: bool) -> Option<f32> {
+        let travel = || {
+            (velocity.xz().length() > FOLLOW_SPEED).then(|| math::atan2(-velocity.x, -velocity.z))
+        };
+        match self {
+            Stance::Hang { facing, along } => {
+                Some(facing + std::f32::consts::PI + HANG_PEEK * along)
+            }
+            // Do not chase a tumble.
+            Stance::Limp => None,
+            Stance::Slide => travel(),
+            Stance::Feet | Stance::Air { .. } => pushing.then(travel).flatten(),
+        }
+    }
+}
+
+/// What the camera reads of the world at the top of `present`. Never stored.
+#[derive(Clone, Copy, Debug)]
+struct Subject {
+    /// The capsule's centre, m. In a ragdoll this is the hips.
+    centre: Vec3,
+    stance: Stance,
+}
+
+impl Subject {
+    fn read(w: &World, motion: Motion) -> Subject {
+        Subject {
+            centre: w.require::<Transform>("player").position,
+            stance: Stance::of(&w.require::<Parkour>("player"), &motion),
+        }
+    }
+}
+
+/// What the camera remembers of the body between ticks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
+struct Track {
+    /// The capsule's centre last tick, m.
+    centre: Vec3,
+    /// Smoothed velocity from the centre's own motion, m/s. It is right on scripted
+    /// courses and in a ragdoll, where the controller's velocity is not.
+    velocity: Vec3,
+}
+
+impl Track {
+    fn step(&mut self, centre: Vec3, dt: f32) {
+        self.velocity = math::ease(self.velocity, (centre - self.centre) / dt, VELOCITY_LAG, dt);
+        self.centre = centre;
     }
 }
 
