@@ -1,9 +1,10 @@
 //! What a player sees of the camera: where the runner stands on the screen, how a
 //! finger turns the view, and how the view follows the run.
-use exact_beat_em_up_logic::body::{self, HEIGHT, RADIUS};
+use exact_beat_em_up_logic::body::{self, Action, Parkour, HEIGHT, RADIUS};
 use exact_beat_em_up_logic::camera::{self, tune};
-use exact_beat_em_up_logic::{ExactBeatEmUp, Options, ARENA_MODE};
+use exact_beat_em_up_logic::{gait, park, ExactBeatEmUp, Options, ARENA_MODE};
 use exact_game::*;
+use exact_game_physics::{self as physics, CapsuleController, Collider, Shape};
 
 type Game = Sim<ExactBeatEmUp>;
 
@@ -16,6 +17,17 @@ fn start() -> Game {
     let mut sim = Sim::new(Options {
         seed: 7,
         mode: ARENA_MODE,
+        ..Options::default()
+    })
+    .unwrap();
+    sim.run(25.0);
+    sim
+}
+
+// The obstacle park, where `start` is open ground.
+fn start_in_the_park() -> Game {
+    let mut sim = Sim::new(Options {
+        seed: 7,
         ..Options::default()
     })
     .unwrap();
@@ -36,6 +48,49 @@ fn eye(sim: &Game) -> Vec3 {
 
 fn feet(sim: &Game) -> Vec3 {
     body::feet(sim.get::<Transform>("player").unwrap().position)
+}
+
+fn centre(sim: &Game) -> Vec3 {
+    sim.get::<Transform>("player").unwrap().position
+}
+
+fn action(sim: &Game) -> Action {
+    sim.get::<Parkour>("player").unwrap().action.clone()
+}
+
+// Advance until `done`, for `ms` at most. Returns whether it came.
+fn run_until(sim: &mut Game, ms: f64, done: impl Fn(&Game) -> bool) -> bool {
+    for _ in 0..(ms / TICK_MS) as u32 {
+        sim.run(TICK_MS);
+        if done(sim) {
+            return true;
+        }
+    }
+    false
+}
+
+// A solid box, as the park's blocks are.
+fn wall(sim: &mut Game, at: Vec3, half: Vec3) -> Entity {
+    sim.world_mut().spawn((
+        Transform::at(at.x, at.y, at.z),
+        Collider {
+            shape: Shape::Box { half },
+            layer: park::SOLID,
+            ..Collider::default()
+        },
+    ))
+}
+
+// Whether the lens, with the near plane inside it, is out of everything solid.
+fn lens_is_clear(sim: &Game) -> bool {
+    let eye = eye(sim);
+    physics::overlap(
+        sim.world(),
+        &Shape::Sphere { radius: 0.15 },
+        Transform::at(eye.x, eye.y, eye.z),
+        park::SOLID,
+    )
+    .is_empty()
 }
 
 // Where a world point is on a canvas of `viewport` points, origin at the top left.
@@ -602,4 +657,305 @@ fn tilt_goes_home_only_while_moving() {
         "the tilt stayed at {} during a run",
         elevation(&sim)
     );
+}
+
+#[test]
+fn the_runner_falls_back_at_a_sprint_and_returns_at_a_stand() {
+    let mut sim = start();
+    let back = |sim: &Game| ((eye(sim) - feet(sim)) * Vec3::new(1.0, 0.0, 1.0)).length();
+    let standing = back(&sim);
+    sim.key_down("ShiftLeft");
+    sim.key_down("KeyW");
+    sim.run(2000.0);
+    let trailing = back(&sim) - standing;
+    assert!(
+        trailing > 0.8 * gait::SPRINT * tune::FOCUS_LAG && trailing < tune::FOCUS_LEASH + 1e-3,
+        "the eye is {trailing} m further back at a sprint"
+    );
+    sim.key_up("KeyW");
+    sim.key_up("ShiftLeft");
+    sim.run(1500.0);
+    assert!((back(&sim) - standing).abs() < 0.01);
+}
+
+#[test]
+fn a_jump_does_not_bob_the_view() {
+    let mut sim = start();
+    let (eye_rest, body_rest) = (eye(&sim).y, centre(&sim).y);
+    sim.tap("Space");
+    let (mut eye_rise, mut body_rise) = (0.0f32, 0.0f32);
+    for _ in 0..120 {
+        sim.run(TICK_MS);
+        eye_rise = eye_rise.max(eye(&sim).y - eye_rest);
+        body_rise = body_rise.max(centre(&sim).y - body_rest);
+    }
+    assert!(body_rise > 0.9 * body::JUMP, "the jump rose {body_rise} m");
+    assert!(
+        eye_rise < body_rise / 2.0,
+        "the eye rose {eye_rise} m with a jump of {body_rise} m"
+    );
+}
+
+#[test]
+fn a_fall_tilts_the_view_down_and_keeps_the_feet_in_frame() {
+    for viewport in [LANDSCAPE, PORTRAIT] {
+        let mut sim = start_on(viewport);
+        let level = camera::view(sim.world()).elevation;
+        sim.post("goto 0 3.5 0 180");
+        let mut fast = 0;
+        for _ in 0..240 {
+            sim.run(TICK_MS);
+            let falling = -sim.get::<CapsuleController>("player").unwrap().velocity.y;
+            if action(&sim) != Action::Air || falling < 6.0 {
+                continue;
+            }
+            fast += 1;
+            let elevation = camera::view(sim.world()).elevation;
+            assert!(
+                elevation > level + 0.02,
+                "{viewport}: the view is level in a fall of {falling} m/s"
+            );
+            let at = screen(&sim, viewport, feet(&sim));
+            assert!(
+                at.cmpgt(Vec2::ZERO).all() && at.cmplt(viewport).all(),
+                "{viewport}: the feet are off the screen at {at}"
+            );
+        }
+        assert!(fast > 10, "{viewport}: the fall never reached 6 m/s");
+    }
+}
+
+#[test]
+fn a_landing_dips_the_rig_and_it_recovers() {
+    let mut sim = start();
+    // The height of the point the boom hangs from.
+    let anchor = |sim: &Game| {
+        let view = camera::view(sim.world());
+        eye(sim).y - view.boom * view.elevation.sin()
+    };
+    let rest = anchor(&sim);
+    sim.post("goto 0 2 0 180");
+    assert!(run_until(&mut sim, 500.0, |sim| action(sim) == Action::Air));
+    assert!(run_until(&mut sim, 2000.0, |sim| action(sim) != Action::Air));
+    let mut dip = 0.0f32;
+    for _ in 0..60 {
+        sim.run(TICK_MS);
+        dip = dip.max(rest - anchor(&sim));
+    }
+    assert!(dip > 0.01 && dip < 0.08, "the landing dipped the rig {dip} m");
+    assert!(
+        (anchor(&sim) - rest).abs() < 0.005,
+        "the rig is not back half a second after the landing"
+    );
+}
+
+#[test]
+fn a_sprint_widens_the_view() {
+    let mut sim = start();
+    let fov = |sim: &Game| sim.get::<Camera>("camera").unwrap().fov_y_degrees;
+    sim.key_down("KeyW");
+    sim.run(2000.0);
+    assert!(
+        (fov(&sim) - tune::LANDSCAPE.fov).abs() < 0.05,
+        "a run changed the field of view to {}",
+        fov(&sim)
+    );
+    sim.key_down("ShiftLeft");
+    sim.run(2500.0);
+    assert!(
+        (fov(&sim) - tune::LANDSCAPE.fov - tune::SPRINT_FOV).abs() < 0.1,
+        "the field of view at a sprint is {}",
+        fov(&sim)
+    );
+}
+
+#[test]
+fn a_slide_lowers_the_eye_and_it_comes_back() {
+    let mut sim = start();
+    let above = |sim: &Game| eye(sim).y - feet(sim).y;
+    let standing = above(&sim);
+    sim.key_down("KeyW");
+    sim.run(800.0);
+    sim.tap("KeyC");
+    sim.run(250.0);
+    assert!(matches!(action(&sim), Action::Slide { .. }));
+    let lowered = standing - above(&sim);
+    assert!(
+        lowered > 0.6 * tune::SLIDE_DROP && lowered < tune::SLIDE_DROP,
+        "a slide lowered the eye {lowered} m"
+    );
+    sim.run(2000.0);
+    assert!((above(&sim) - standing).abs() < 0.02);
+}
+
+#[test]
+fn a_hang_is_seen_from_behind_and_above_and_a_shimmy_turns_the_view() {
+    let mut sim = start_in_the_park();
+    // Three metres south of the south face of `ledge-mid`, which is at z = -12.
+    sim.post("goto -3 0 -9 180");
+    sim.run(100.0);
+    let level = camera::view(sim.world()).elevation;
+    sim.key_down("KeyW");
+    assert!(run_until(&mut sim, 4000.0, |sim| feet(sim).z - RADIUS + 12.0 < 0.35));
+    sim.tap("Space");
+    let hanging = |sim: &Game| matches!(action(sim), Action::Hang(_));
+    assert!(run_until(&mut sim, 900.0, hanging), "{:?}", action(&sim));
+    sim.key_up("KeyW");
+    sim.run(400.0);
+    drag(&mut sim, 200.0, 0.0, 10);
+    sim.run(4000.0);
+    assert!(hanging(&sim));
+    let view = camera::view(sim.world());
+    assert!(
+        ahead(view.yaw).dot(-Vec3::Z) > 20.0f32.to_radians().cos(),
+        "the view is not behind the hanging body: it looks along {}",
+        ahead(view.yaw)
+    );
+    assert!(
+        view.elevation > level + 0.8 * tune::HANG_TILT,
+        "the view does not look down on the edge: {view:?}"
+    );
+
+    sim.key_down("KeyA");
+    sim.run(1200.0);
+    assert!(hanging(&sim));
+    let peek = math::wrap_angle(yaw(&sim) - view.yaw);
+    assert!(
+        peek > 0.5 * tune::HANG_PEEK && peek < 1.1 * tune::HANG_PEEK,
+        "a shimmy to the left turned the view {peek} rad to the left"
+    );
+}
+
+#[test]
+fn a_ragdoll_is_centred_and_the_view_does_not_chase_the_tumble() {
+    let mut sim = start();
+    // Face east, and send the heaviest roller at the body's back.
+    sim.post("goto 0 0 0 90");
+    sim.run(100.0);
+    sim.post("roller 3 6");
+    sim.key_down("KeyW");
+    assert!(run_until(&mut sim, 2000.0, |sim| action(sim) == Action::Ragdoll));
+    let from = centre(&sim);
+    sim.run(1000.0);
+    let tumbled = centre(&sim) - from;
+    assert!(tumbled.x > 1.0, "the hit sent the body {tumbled}");
+    let view = camera::view(sim.world());
+    assert!(
+        view.yaw.abs() < 0.05,
+        "the view chased the tumble to yaw {}",
+        view.yaw
+    );
+    assert!(view.shoulder < 0.1, "the tumble is off centre: {view:?}");
+    assert!(view.boom > tune::LANDSCAPE.boom + 0.5 * tune::LIMP_BOOM, "{view:?}");
+}
+
+#[test]
+fn a_teleport_is_a_cut() {
+    let mut sim = start();
+    let offset = eye(&sim) - centre(&sim);
+    sim.key_down("KeyD");
+    sim.run(1500.0);
+    sim.post("goto 15 0 -20 180");
+    sim.run(TICK_MS);
+    assert!(centre(&sim).distance(Vec3::new(15.0, body::HALF, -20.0)) < 0.1);
+    let placed = Quat::from_rotation_y(yaw(&sim)) * offset;
+    assert!(
+        (eye(&sim) - centre(&sim)).distance(placed) < 0.05,
+        "the camera swept after the body: it is {} from it",
+        eye(&sim) - centre(&sim)
+    );
+}
+
+#[test]
+fn a_wall_beside_the_runner_closes_the_shoulder_and_keeps_the_boom() {
+    let mut sim = start();
+    // Its face is 0.5 m to the right of the body's axis.
+    wall(&mut sim, Vec3::new(0.7, 2.0, 0.0), Vec3::new(0.2, 2.0, 6.0));
+    sim.run(1000.0);
+    let view = camera::view(sim.world());
+    assert!(
+        view.shoulder < 0.5 - tune::LENS + 1e-3,
+        "the lens does not fit between the body and the wall: {view:?}"
+    );
+    assert!(view.boom > 0.95 * tune::LANDSCAPE.boom, "{view:?}");
+    assert!(eye(&sim).x < 0.5 && lens_is_clear(&sim));
+}
+
+#[test]
+fn a_wall_behind_the_runner_shortens_the_boom_at_once_and_it_lengthens_slowly() {
+    let mut sim = start();
+    let open = camera::view(sim.world()).boom;
+    // Its face is 1.8 m behind the body's axis.
+    let behind = wall(&mut sim, Vec3::new(0.0, 2.0, 2.0), Vec3::new(4.0, 2.0, 0.2));
+    sim.run(TICK_MS);
+    assert!(
+        eye(&sim).z < 1.8 && lens_is_clear(&sim),
+        "the lens was in the wall for a tick: {}",
+        eye(&sim)
+    );
+    sim.run(500.0);
+    assert!(eye(&sim).z < 1.8 && lens_is_clear(&sim));
+    sim.world_mut().despawn(behind);
+    let mut before = camera::view(sim.world()).boom;
+    for _ in 0..480 {
+        sim.run(TICK_MS);
+        let now = camera::view(sim.world()).boom;
+        assert!(
+            now >= before && now - before < 0.05,
+            "the boom went from {before} to {now} m in a tick"
+        );
+        before = now;
+    }
+    assert!((before - open).abs() < 0.01, "the boom came back to {before} m");
+}
+
+#[test]
+fn a_short_boom_lifts_the_eye_over_the_head() {
+    let mut sim = start();
+    // Its face is 0.9 m behind the body's axis.
+    wall(&mut sim, Vec3::new(0.0, 2.0, 1.1), Vec3::new(4.0, 2.0, 0.2));
+    sim.run(1500.0);
+    let view = camera::view(sim.world());
+    assert!(view.boom < tune::CROWD_FAR, "{view:?}");
+    let unlifted = tune::LANDSCAPE.height + view.boom * view.elevation.sin();
+    let lifted = eye(&sim).y - feet(&sim).y - unlifted;
+    assert!(
+        lifted > 0.1 && lifted < tune::CROWD_LIFT + 1e-3,
+        "a boom of {} m lifted the eye {lifted} m",
+        view.boom
+    );
+    assert!(lens_is_clear(&sim));
+}
+
+#[test]
+fn the_lens_stays_out_of_solid_geometry() {
+    // Feet positions: beside a wall, in a concave corner, on a roof's edge, under
+    // the ramp against its back wall, and on the stairs.
+    let spots = [
+        [2.0, 0.0, -11.5],
+        [-21.0, 0.0, -14.0],
+        [-16.0, 2.0, -10.0],
+        [14.0, 0.0, -13.6],
+        [6.0, 0.45, 6.0],
+    ];
+    // A full turn of the view, in points.
+    let around = std::f32::consts::TAU / tune::YAW_PER_POINT;
+    for [x, y, z] in spots {
+        let mut sim = start_in_the_park();
+        sim.post(format!("goto {x} {y} {z} 180"));
+        sim.run(200.0);
+        touch(&mut sim, PointerPhase::Down, 0.0, 0.0);
+        // Level, from below and from above.
+        for tilt in [0.0, -400.0, 800.0] {
+            slide(&mut sim, 0.0, tilt, 20);
+            for step in 0..240 {
+                slide(&mut sim, around / 240.0, 0.0, 1);
+                assert!(
+                    lens_is_clear(&sim),
+                    "at {x} {y} {z}, tilt {tilt}, step {step}: the lens is in a wall at {}",
+                    eye(&sim)
+                );
+            }
+        }
+    }
 }

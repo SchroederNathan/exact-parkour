@@ -12,9 +12,11 @@
 //!
 //! Call `input` before `body::step` and `present` last in the tick.
 use exact_game::*;
+use exact_game_physics::{self as physics, Shape};
 
 use crate::body::{self, Action, Motion, Parkour};
 use crate::gait::{RUN, SPRINT};
+use crate::park;
 
 /// Every tuning number of the camera, with its unit. Tests read these, so a retune
 /// does not break a test that states a relation.
@@ -44,7 +46,8 @@ pub mod tune {
     /// above which it is `LANDSCAPE`. Between them the two blend (a tablet, a fold).
     pub const ASPECT_PORTRAIT: f32 = 0.75;
     pub const ASPECT_LANDSCAPE: f32 = 1.50;
-    /// Near plane, m.
+    /// Near plane, m. The lens sphere (`LENS`) contains the near plane's corners:
+    /// the furthest is 0.09 m from the eye (landscape, 61 degrees, aspect 2.17).
     pub const NEAR: f32 = 0.05;
 
     /// Time constants, s, with which each framing number reaches its target.
@@ -97,8 +100,57 @@ pub mod tune {
     /// a full lean.
     pub const HANG_PEEK: f32 = 0.30;
 
+    /// Time constant, s, of the focus in the ground plane, and the furthest it trails, m.
+    pub const FOCUS_LAG: f32 = 0.08;
+    pub const FOCUS_LEASH: f32 = 0.55;
+    /// Angular frequency, rad/s, of the critically damped vertical spring, by stance.
+    /// In the air it is `LIFT_JUMP` while the body is above the focus and
+    /// `LIFT_FALL` while it is below.
+    pub const LIFT_FEET: f32 = 16.0;
+    pub const LIFT_JUMP: f32 = 1.0;
+    pub const LIFT_FALL: f32 = 12.0;
+    pub const LIFT_HANG: f32 = 10.0;
+    pub const LIFT_LIMP: f32 = 6.0;
+    /// The body may rise this far above the focus, and drop this far below it, m.
+    pub const LEASH_UP: f32 = 0.45;
+    pub const LEASH_DOWN: f32 = 0.15;
+    /// A touchdown pushes the focus down: m/s of focus speed per m/s of impact, and
+    /// the most, m/s. With `LIFT_FEET` the deepest dip is speed / (e * 16): 7 cm.
+    pub const DIP: f32 = 0.30;
+    pub const DIP_MAX: f32 = 3.2;
     /// Time constant, s, of the camera's estimate of the body's velocity.
     pub const VELOCITY_LAG: f32 = 0.10;
+
+    /// Degrees of field of view added at `SPRINT` speed; nothing at `RUN` and below.
+    pub const SPRINT_FOV: f32 = 6.0;
+    /// In the air: metres of boom added, and the downward tilt, rad, that a fall of
+    /// `FALL_FAST` m/s adds; nothing under `FALL_SLOW`.
+    pub const AIR_BOOM: f32 = 0.15;
+    pub const FALL_TILT: f32 = 0.22;
+    pub const FALL_SLOW: f32 = 3.0;
+    pub const FALL_FAST: f32 = 9.0;
+    /// A slide lowers the anchor, m, and widens the view, degrees.
+    pub const SLIDE_DROP: f32 = 0.45;
+    pub const SLIDE_FOV: f32 = 3.0;
+    /// A hang: anchor up, m; boom out, m; tilt down, rad; share of the shoulder kept.
+    pub const HANG_RISE: f32 = 0.10;
+    pub const HANG_BOOM: f32 = 0.50;
+    pub const HANG_TILT: f32 = 0.28;
+    pub const HANG_SHOULDER: f32 = 0.6;
+    /// A limp body (ragdoll, and the first half of the rise): boom out, m; tilt down,
+    /// rad; share of the shoulder kept (none: the tumble is centred).
+    pub const LIMP_BOOM: f32 = 0.90;
+    pub const LIMP_TILT: f32 = 0.20;
+    pub const LIMP_SHOULDER: f32 = 0.0;
+    /// As a blocked boom shortens from `CROWD_FAR` to `CROWD_NEAR`, m, the anchor
+    /// rises by up to `CROWD_LIFT`, m, so the eye goes over the head and not into it.
+    pub const CROWD_FAR: f32 = 1.2;
+    pub const CROWD_NEAR: f32 = 0.5;
+    pub const CROWD_LIFT: f32 = 0.35;
+
+    /// Radius of the sphere swept for the lens, m, and the gap it keeps, m.
+    pub const LENS: f32 = 0.20;
+    pub const SKIN: f32 = 0.04;
 
     /// A body that moves further than this in one tick, m, has been put somewhere: a cut.
     pub const CUT: f32 = 3.0;
@@ -112,9 +164,9 @@ pub struct View {
     pub yaw: f32,
     /// Elevation of the eye above the anchor, rad.
     pub elevation: f32,
-    /// Length of the boom, m.
+    /// Length of the boom after collision, m.
     pub boom: f32,
-    /// Offset of the anchor to the right, m.
+    /// Offset of the anchor to the right after collision, m.
     pub shoulder: f32,
     /// Vertical field of view, degrees.
     pub fov: f32,
@@ -194,7 +246,7 @@ pub fn movement(w: &World, stick: Vec3) -> Vec3 {
 pub fn present(w: &mut World, motion: Motion) {
     let dt = w.dt();
     let subject = Subject::read(w, motion);
-    let shot = w.resource_mut::<Rig>().shoot(&subject, dt);
+    let shot = w.resource_mut::<Rig>().shoot(w, &subject, dt);
     let camera = w.named("camera").expect("camera::setup spawns the camera");
     if shot.cut {
         // A cut must not be interpolated by the renderer.
@@ -244,8 +296,9 @@ struct Rig {
     heading: Heading,
     follow: Follow,
     track: Track,
-    /// The eased framing, not its target.
+    /// The eased framing, after collision. Not the target.
     framing: Framing,
+    focus: Focus,
     /// Canvas size in points as `input` last saw it; zero before the host reports one.
     viewport: Vec2,
     /// The next `present` places the rig instead of easing it.
@@ -267,14 +320,18 @@ impl Rig {
     }
     /// Snap everything that lags to where it is going. Keeps the heading and the tilt.
     fn place(&mut self, subject: &Subject) {
-        self.framing = Framing::framed(self.viewport);
+        self.framing = Framing::framed(self.viewport).staged(subject.stance, 0.0, f32::MAX);
+        self.focus = Focus {
+            at: subject.centre,
+            lift: 0.0,
+        };
         self.track = Track {
             centre: subject.centre,
             velocity: Vec3::ZERO,
         };
         self.follow.rate = 0.0;
     }
-    fn shoot(&mut self, subject: &Subject, dt: f32) -> Shot {
+    fn shoot(&mut self, w: &World, subject: &Subject, dt: f32) -> Shot {
         let cut =
             std::mem::take(&mut self.cut) || subject.centre.distance(self.track.centre) > CUT;
         if cut {
@@ -303,14 +360,17 @@ impl Rig {
         self.follow
             .step(&mut self.heading, want, self.look.owns(), pace, dt);
         self.look.settle(want.is_some(), self.follow.authority, dt);
-        self.framing.ease(Framing::framed(self.viewport), dt);
+        let target =
+            Framing::framed(self.viewport).staged(subject.stance, pace, self.framing.boom);
+        self.framing.ease(target, dt);
+        if subject.impact > 0.0 {
+            self.focus.lift -= (subject.impact * DIP).min(DIP_MAX);
+        }
+        self.focus.step(subject, dt);
         let basis = Basis::new(self.heading.view(), self.elevation());
-        let anchor = subject.centre
-            + Vec3::Y * (self.framing.height - body::HALF)
-            + basis.right() * self.framing.shoulder;
         Shot {
             pose: Transform {
-                position: anchor + basis.back() * self.framing.boom,
+                position: clear(w, subject, &self.focus, &mut self.framing, &basis),
                 rotation: basis.rotation(),
                 ..Transform::default()
             },
@@ -539,6 +599,19 @@ impl Stance {
             Stance::Feet | Stance::Air { .. } => pushing.then(travel).flatten(),
         }
     }
+    /// Angular frequency of the vertical spring, rad/s, for a body `above` m
+    /// above the focus.
+    fn lift(self, above: f32) -> f32 {
+        match self {
+            Stance::Feet | Stance::Slide => LIFT_FEET,
+            // A body above the focus is in a jump. The view must not follow it
+            // up, also not on its way down.
+            Stance::Air { .. } if above > 0.0 => LIFT_JUMP,
+            Stance::Air { .. } => LIFT_FALL,
+            Stance::Hang { .. } => LIFT_HANG,
+            Stance::Limp => LIFT_LIMP,
+        }
+    }
 }
 
 /// What the camera reads of the world at the top of `present`. Never stored.
@@ -547,6 +620,10 @@ struct Subject {
     /// The capsule's centre, m. In a ragdoll this is the hips.
     centre: Vec3,
     stance: Stance,
+    /// Vertical velocity, m/s.
+    rising: f32,
+    /// Downward speed of a touchdown this tick, m/s; zero otherwise.
+    impact: f32,
 }
 
 impl Subject {
@@ -554,6 +631,8 @@ impl Subject {
         Subject {
             centre: w.require::<Transform>("player").position,
             stance: Stance::of(&w.require::<Parkour>("player"), &motion),
+            rising: motion.rising,
+            impact: motion.impact,
         }
     }
 }
@@ -608,12 +687,71 @@ impl Framing {
             fov: math::lerp(PORTRAIT.fov, LANDSCAPE.fov, wide),
         }
     }
+    /// This framing as `stance` changes it at `pace` m/s. `boom` is the present
+    /// boom after collision, which lifts the anchor when it is short.
+    fn staged(mut self, stance: Stance, pace: f32, boom: f32) -> Framing {
+        self.fov += SPRINT_FOV * math::smoothstep(RUN, SPRINT, pace);
+        match stance {
+            Stance::Feet => {}
+            Stance::Air { fall } => {
+                self.boom += AIR_BOOM;
+                self.elevation += FALL_TILT * math::smoothstep(FALL_SLOW, FALL_FAST, fall);
+            }
+            Stance::Slide => {
+                self.height -= SLIDE_DROP;
+                self.fov += SLIDE_FOV;
+            }
+            Stance::Hang { .. } => {
+                self.height += HANG_RISE;
+                self.boom += HANG_BOOM;
+                self.elevation += HANG_TILT;
+                self.shoulder *= HANG_SHOULDER;
+            }
+            Stance::Limp => {
+                self.boom += LIMP_BOOM;
+                self.elevation += LIMP_TILT;
+                self.shoulder *= LIMP_SHOULDER;
+            }
+        }
+        self.height += CROWD_LIFT * (1.0 - math::smoothstep(CROWD_NEAR, CROWD_FAR, boom));
+        self
+    }
+    /// Move each number toward `target` with its own time constant.
     fn ease(&mut self, target: Framing, dt: f32) {
         self.height = math::ease(self.height, target.height, HEIGHT_LAG, dt);
         self.boom = math::ease(self.boom, target.boom, BOOM_LAG, dt);
         self.shoulder = math::ease(self.shoulder, target.shoulder, SHOULDER_LAG, dt);
         self.elevation = math::ease(self.elevation, target.elevation, ELEVATION_LAG, dt);
         self.fov = math::ease(self.fov, target.fov, FOV_LAG, dt);
+    }
+}
+
+/// The lagged point the rig stands on: the capsule's centre, late.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Data)]
+struct Focus {
+    at: Vec3,
+    /// Vertical speed of the focus, m/s: the state of its spring.
+    lift: f32,
+}
+
+impl Focus {
+    fn step(&mut self, subject: &Subject, dt: f32) {
+        let centre = subject.centre;
+        let behind = (self.at - centre) * Vec3::new(1.0, 0.0, 1.0);
+        let behind = math::ease(behind, Vec3::ZERO, FOCUS_LAG, dt).clamp_length_max(FOCUS_LEASH);
+        let omega = subject.stance.lift(centre.y - self.at.y);
+        let (mut height, mut lift) = spring(self.at.y, self.lift, centre.y, omega, dt);
+        if height < centre.y - LEASH_UP {
+            height = centre.y - LEASH_UP;
+        }
+        // A falling body takes the focus down with it at its own speed, so the
+        // landing arrives in the spring and not as a stop.
+        if height > centre.y + LEASH_DOWN {
+            height = centre.y + LEASH_DOWN;
+            lift = lift.min(subject.rising);
+        }
+        self.at = Vec3::new(centre.x + behind.x, height, centre.z + behind.z);
+        self.lift = lift;
     }
 }
 
@@ -643,4 +781,54 @@ impl Basis {
     fn rotation(&self) -> Quat {
         self.turn * self.tilt
     }
+}
+
+/// One step of a critically damped spring toward `to`. Exact for any `dt`; a
+/// spring at rest never passes a still target.
+fn spring(at: f32, speed: f32, to: f32, omega: f32, dt: f32) -> (f32, f32) {
+    let decay = math::exp(-omega * dt);
+    let from = at - to;
+    let travel = (speed + omega * from) * dt;
+    (to + (from + travel) * decay, (speed - omega * travel) * decay)
+}
+
+/// Keep the lens out of solid geometry and return the eye. Shortens
+/// `framing.shoulder` and `framing.boom` at once when blocked; `Framing::ease`
+/// lengthens them again slowly.
+///
+/// A wall beside the runner ends the first leg early: the eye slides in behind the
+/// body and keeps its distance. Only a wall behind the runner shortens the boom.
+fn clear(w: &World, subject: &Subject, focus: &Focus, framing: &mut Framing, basis: &Basis) -> Vec3 {
+    let lift = framing.height - body::HALF;
+    // The sweeps start inside the capsule, which the body keeps clear of solids.
+    let reach = body::HALF - body::RADIUS;
+    let origin = subject.centre + Vec3::Y * lift.clamp(-reach, reach);
+    // The lag of the focus is part of this leg, so a lagging focus cannot start
+    // the boom behind a wall.
+    let anchor = focus.at + Vec3::Y * lift + basis.right() * framing.shoulder;
+    let share = free(w, origin, anchor - origin);
+    framing.shoulder *= share;
+    let anchor = origin + (anchor - origin) * share;
+    framing.boom *= free(w, anchor, basis.back() * framing.boom);
+    anchor + basis.back() * framing.boom
+}
+
+/// The share, 0 to 1, of `travel` that a lens sphere at `from` can move.
+fn free(w: &World, from: Vec3, travel: Vec3) -> f32 {
+    let length = travel.length();
+    let lens = Shape::Sphere { radius: LENS };
+    let pose = Transform::at(from.x, from.y, from.z);
+    let reach = match physics::sweep(w, &lens, pose, travel, park::SOLID) {
+        None => return 1.0,
+        // A sweep that starts in contact reports zero (a ragdoll's hips against a
+        // wall). A ray from the same point says how far the lens centre may go.
+        Some(hit) if hit.distance < 1e-3 => {
+            match physics::raycast(w, from, travel, length + LENS, park::SOLID) {
+                None => return 1.0,
+                Some(hit) => hit.distance - LENS,
+            }
+        }
+        Some(hit) => hit.distance,
+    };
+    ((reach - SKIN) / length).clamp(0.0, 1.0)
 }
