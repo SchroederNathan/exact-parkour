@@ -28,7 +28,8 @@ pub mod tune {
 
     // `height` m above the feet, `boom` m, `shoulder` m to the right, `elevation` rad
     // (positive: eye above the anchor, view looks down), `fov` vertical degrees.
-    // Both put the eye 1.62 m above the feet: height + boom * sin(elevation).
+    // The eye is height + boom * sin(elevation) above the feet: 1.62 m in landscape
+    // and 1.71 m in portrait, where a steeper view lifts the runner clear of the pad.
     /// 932 x 430 points. Horizontal field of view 93 degrees.
     pub const LANDSCAPE: Framing = Framing {
         height: 1.25,
@@ -37,13 +38,13 @@ pub mod tune {
         elevation: 0.128,
         fov: 52.0,
     };
-    /// 430 x 932 points. Horizontal field of view 37 degrees.
+    /// 430 x 932 points. Horizontal field of view 38 degrees.
     pub const PORTRAIT: Framing = Framing {
-        height: 1.44,
-        boom: 3.40,
-        shoulder: 0.42,
-        elevation: 0.053,
-        fov: 72.0,
+        height: 1.30,
+        boom: 2.60,
+        shoulder: 0.36,
+        elevation: 0.16,
+        fov: 74.0,
     };
     /// Canvas width / height at and below which the framing is `PORTRAIT`, and at and
     /// above which it is `LANDSCAPE`. Between them the two blend (a tablet, a fold).
@@ -153,9 +154,9 @@ pub mod tune {
 
     /// Scales all three layers of the shake. One number to calm the camera.
     pub const SHAKE: f32 = 1.0;
-    /// Handheld drift at a stand, rad per axis (0.13 degrees), its two frequencies,
+    /// Handheld drift at a stand, rad per axis (0.23 degrees), its two frequencies,
     /// Hz, and how many times larger it is at `SPRINT`.
-    pub const HANDHELD: f32 = 0.0022;
+    pub const HANDHELD: f32 = 0.0040;
     pub const HANDHELD_HZ: [f32; 2] = [0.23, 0.37];
     pub const HANDHELD_RUN: f32 = 2.0;
     /// Footfall, locked to the gait cycle: pitch nod per step and roll per stride,
