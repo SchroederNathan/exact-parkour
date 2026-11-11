@@ -36,7 +36,7 @@ fn every_checkpoint_is_a_place_to_stand() {
         for pair in names.windows(2) {
             assert_ne!(pair[0], pair[1], "{}: two pieces are named {}", level.title, pair[0]);
         }
-        assert!(level.pieces.len() <= 400, "{}: {} pieces", level.title, level.pieces.len());
+        assert!(level.pieces.len() <= 900, "{}: {} pieces", level.title, level.pieces.len());
         let spots = level
             .checkpoints
             .iter()

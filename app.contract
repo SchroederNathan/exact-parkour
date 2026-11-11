@@ -57,6 +57,11 @@ component ExactBeatEmUp
     race = 2
     playing = true
 
+  action chooseRace3
+    mode = 0
+    race = 3
+    playing = true
+
   action chooseArena
     mode = 1
     race = 0
@@ -84,6 +89,12 @@ component ExactBeatEmUp
   action chooseFromPause2
     mode = 0
     race = 2
+    again = not again
+    paused = false
+
+  action chooseFromPause3
+    mode = 0
+    race = 3
     again = not again
     paused = false
 
@@ -158,6 +169,8 @@ component ExactBeatEmUp
                 text "Switchback Run"
               button press=chooseFromPause2 testId="race-helix" aria-label="Helix Heights"
                 text "Helix Heights"
+              button press=chooseFromPause3 testId="race-cascade" aria-label="Gravity Cascade"
+                text "Gravity Cascade"
               button press=chooseArenaFromPause testId="arena-holdout" aria-label="Rooftop Holdout"
                 text "Rooftop Holdout"
           if touch
@@ -184,5 +197,7 @@ component ExactBeatEmUp
               text "Switchback Run"
             button buttonStyle="filled" press=chooseRace2 aria-label="Helix Heights" testId="race-helix"
               text "Helix Heights"
+            button buttonStyle="filled" press=chooseRace3 aria-label="Gravity Cascade" testId="race-cascade"
+              text "Gravity Cascade"
             button buttonStyle="filled" press=chooseArena aria-label="Rooftop Holdout" testId="arena"
               text "Rooftop Holdout"

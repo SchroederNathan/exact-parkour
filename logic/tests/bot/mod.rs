@@ -22,6 +22,10 @@ pub enum Step {
     Run(f32, f32),
     /// The same, with Sprint held.
     Sprint(f32, f32),
+    /// Run toward the point with Sprint held. Done when the runner is at the point
+    /// or past it, on its feet or in a slide. Use it down a ramp and to a lip that
+    /// the runner leaves while it still slides.
+    Glide(f32, f32),
     /// Press Jump. Takes no time: the next step goes on.
     Jump,
     /// Press Slide. Takes no time.
@@ -60,6 +64,12 @@ pub fn action(game: &Game) -> Action {
 }
 pub fn race(game: &Game) -> RaceState {
     game.world().resource::<RaceState>().clone()
+}
+
+/// The runner's speed over the map, m/s.
+pub fn speed(game: &Game) -> f32 {
+    let v = game.get::<exact_game_physics::CapsuleController>("player").unwrap().velocity;
+    flat(v).length()
 }
 
 /// The name of what the body does, without the data of the move.
@@ -131,7 +141,9 @@ fn walk(game: &mut Game, steps: &[Step], trail: &mut Vec<Vec3>) -> Result<Vec<St
         let from = flat(feet(game));
         let began = ticks;
         let target = match *step {
-            Step::Run(x, z) | Step::Sprint(x, z) | Step::Shimmy(x, z) => Some(Vec3::new(x, 0.0, z)),
+            Step::Run(x, z) | Step::Sprint(x, z) | Step::Glide(x, z) | Step::Shimmy(x, z) => {
+                Some(Vec3::new(x, 0.0, z))
+            }
             _ => None,
         };
         match *step {
@@ -145,7 +157,7 @@ fn walk(game: &mut Game, steps: &[Step], trail: &mut Vec<Vec3>) -> Result<Vec<St
                 log.push(format!("{index:3} {step:?} at {:.2}s {:.2}", seconds(ticks), feet(game)));
                 continue;
             }
-            Step::Sprint(..) if !sprinting => {
+            Step::Sprint(..) | Step::Glide(..) if !sprinting => {
                 game.key_down("ShiftLeft");
                 sprinting = true;
             }
@@ -168,6 +180,11 @@ fn walk(game: &mut Game, steps: &[Step], trail: &mut Vec<Vec3>) -> Result<Vec<St
                     let (target, way) = (target.unwrap(), way.unwrap());
                     let near = (at - target).length() < 0.15 || (at - target).dot(way) > -0.05;
                     near && matches!(action(game), Action::Ground)
+                }
+                Step::Glide(..) => {
+                    let (target, way) = (target.unwrap(), way.unwrap());
+                    let near = (at - target).length() < 0.15 || (at - target).dot(way) > -0.05;
+                    near && matches!(action(game), Action::Ground | Action::Slide(_))
                 }
                 Step::Hang => matches!(action(game), Action::Hang(_)),
                 Step::Shimmy(..) => (at - target.unwrap()).length() < 0.3,
@@ -218,12 +235,46 @@ fn walk(game: &mut Game, steps: &[Step], trail: &mut Vec<Vec3>) -> Result<Vec<St
                 trail.push(now);
             }
             if trace && ticks % 12 == 0 {
-                eprintln!("{:6.2}s step {index:3} {:.2} {}", seconds(ticks), now, doing(game));
+                eprintln!(
+                    "{:6.2}s step {index:3} {:.2} {} {:.1} m/s",
+                    seconds(ticks),
+                    now,
+                    doing(game),
+                    speed(game)
+                );
             }
         }
         log.push(format!("{index:3} {step:?} done at {:.2}s {:.2}", seconds(ticks), feet(game)));
     }
     Ok(log)
+}
+
+/// Play one part of race `id`: stand the runner at `entry` (its feet, and the yaw
+/// it faces in degrees, where 180 is north), play `steps`, and require that it ends
+/// on its feet within 2.5 m of `exit` with no fall. `entry` of `None` is the
+/// level's own start. Returns the time of the part, seconds.
+#[track_caller]
+pub fn cross(id: u8, entry: Option<[f32; 4]>, steps: &[Step], exit: [f32; 3]) -> f32 {
+    let mut game = start(id);
+    if let Some([x, y, z, yaw]) = entry {
+        game.post(format!("goto {x} {y} {z} {yaw}"));
+        game.run(150.0);
+    }
+    let began = game.world().tick();
+    let log = match follow(&mut game, steps) {
+        Ok(log) => log,
+        Err(why) => panic!("{why}"),
+    };
+    let time = (game.world().tick() - began) as f32 / 120.0;
+    let at = feet(&game);
+    let exit = Vec3::from_array(exit);
+    assert!(
+        flat(at - exit).length() < 2.5 && (at.y - exit.y).abs() < 1.5,
+        "the part ended at {at:.2} and not at {exit:.2}\n{}",
+        log.join("\n")
+    );
+    println!("{}\ncrossed in {time:.1} s", log.join("\n"));
+    time
 }
 
 /// Play the whole of race `id` with `steps` and require the finish, with no fall.

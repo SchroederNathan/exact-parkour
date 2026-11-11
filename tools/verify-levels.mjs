@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 
 const contract = readFileSync("app.contract", "utf8");
 const rust = readFileSync("logic/src/lib.rs", "utf8");
-const required = ["chooseRace0", "chooseRace1", "chooseRace2", "chooseArena", "chooseArenaFromPause", "mode=mode", "race=race"];
+const required = ["chooseRace0", "chooseRace1", "chooseRace2", "chooseRace3", "chooseArena", "chooseArenaFromPause", "mode=mode", "race=race"];
 const missing = required.filter((needle) => !contract.includes(needle));
 if (missing.length) {
   console.error(`missing level controls: ${missing.join(", ")}`);

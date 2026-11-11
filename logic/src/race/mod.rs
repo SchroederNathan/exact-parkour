@@ -7,6 +7,7 @@ use exact_game_physics::{CapsuleController, Collider};
 use crate::body::{self, Parkour};
 use crate::park;
 
+pub mod cascade;
 pub mod city;
 pub mod helix;
 pub mod kit;
@@ -17,7 +18,7 @@ pub mod yard;
 use kit::{Checkpoint, Kind, Level, Look, Piece};
 
 /// How many races the menus offer.
-pub const COUNT: u8 = 3;
+pub const COUNT: u8 = 4;
 /// The id of the test yard: one roof, which a test builds on.
 pub const YARD: u8 = 255;
 
@@ -27,6 +28,7 @@ pub fn level(id: u8) -> Level {
         0 => skyline::level(),
         1 => switchback::level(),
         2 => helix::level(),
+        3 => cascade::level(),
         _ => yard::level(),
     }
 }

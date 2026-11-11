@@ -37,9 +37,10 @@ test "A finger that slides onto Sprint from Jump holds it until it lifts"
   expect state lent == false
   expect state under == ""
 
-test "The title offers three races and a holdout"
+test "The title offers four races and a holdout"
   expect tree has "race-switchback"
   expect tree has "race-helix"
+  expect tree has "race-cascade"
   expect tree has "arena"
 
 test "The pause menu can switch between every level"
@@ -48,6 +49,7 @@ test "The pause menu can switch between every level"
   expect tree has "race-skyline"
   expect tree has "race-switchback"
   expect tree has "race-helix"
+  expect tree has "race-cascade"
   expect tree has "arena-holdout"
 
 test "The holdout opens with combat HUD"
