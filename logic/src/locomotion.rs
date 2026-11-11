@@ -137,6 +137,7 @@ pub fn drive(w: &mut World, target: &str, motion: Motion) {
         let mut animator = w.require_mut::<Animator>(target);
         animator.set("pace", pace);
         animator.set("stride", motion.stride);
+        animator.set("lean", motion.lean);
         animator.set("act", motion.act.code());
         animator.set("supine", if motion.supine { 1.0 } else { 0.0 });
         // The blend's clock runs `rate` times its own period.

@@ -623,7 +623,7 @@ impl Stance {
             Action::Air => Stance::Air {
                 fall: (-motion.rising).max(0.0),
             },
-            Action::Slide { .. } => Stance::Slide,
+            Action::Slide(_) => Stance::Slide,
             Action::Hang(hang) => {
                 let inward = hang.ledge.inward();
                 Stance::Hang {

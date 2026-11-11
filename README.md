@@ -50,6 +50,8 @@ A jump starts from the gait. The foot that came down last pushes, and the other 
 
 A climb is one course from a hang to a stand: pull up, press the hips up over the edge, put one foot on the top, rock over it and stand. It takes 1.08 s from a hang. A body that climbs from the ground or catches a lower edge is already part of the way up. It joins the course at its own height, so its pose fits the height of the wall. What the body is off the course when it joins, and how fast, dies away as a spring: a run at the wall carries the body to it, and a fall onto an edge sags and comes back. The catch of a hang works the same way. The leg that led the jump steps onto the top first.
 
+On a wall the legs keep out of it. A knee or a foot that the pose has in the wall moves out by the nearer way, through the face or over the top, and that way changes without a step, so a leg near the edge does not flick in and out. In the air the legs start to keep out of a wall as it comes into sight.
+
 A hanging body stays on the edge until the stick stops pushing at the wall. After that:
 
 | Stick | Result |
@@ -62,7 +64,21 @@ A hanging body stays on the edge until the stick stops pushing at the wall. Afte
 
 A body stands on its feet: with no ground within a foot's width under it, it slips off the edge it is past.
 
-A slide starts from 2.5 m/s or more. It lasts 0.8 s, keeps 85 percent of the speed, steers a little, and ends in a run. Jump cuts it short. A slide goes under a bar whose underside is 1.05 m up, which stops a body on its feet. Under the bar the slide stays low and goes on until the body is clear.
+A slide starts from 2.5 m/s or more. On level ground it lasts 0.8 s, and the ground takes 20 percent of its speed each second. On a slope, gravity adds to its speed downhill and takes from it uphill. The fastest slide is 10 m/s. While a slope of about 4 degrees or more pulls the body on, the slide lasts to the end of that slope, and the body lies along the slope.
+
+The stick leans the body into a turn. The stick and the lean together turn the slide at up to 2.2 rad/s.
+
+| Lean | Pose |
+|---|---|
+| None | The body sits back and a little to the left, the left hand on the ground behind it |
+| To the left | The body is further over the left hand, and the right arm is higher |
+| To the right | The body is on its right side, the right hand on the ground, the left arm out |
+
+The weight goes from one side to the other in half a second, and one hand comes off the ground while the other goes down.
+
+A slide ends in a run, and Jump cuts it short. Speed that a slope gave the body above the speed of its legs stays with it after the slide. That speed decreases by 1.5 m/s² on the ground and does not decrease in the air.
+
+A slide goes under a bar whose underside is 1.05 m up, which stops a body on its feet. Under the bar the slide stays low and goes on until the body is clear.
 
 Landings depend on the downward speed at touchdown, and each is deeper the harder it is.
 
@@ -103,11 +119,11 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 99 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` runs 104 hostless tests and the determinism lints.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
-- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick.
+- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides on level ground, through a turn to each side, and down and up the ramp, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick. Another runs 16 catches and climbs and fails if a joint shakes on the wall: if the change of its speed turns round from one tick to the next by more than 0.075 m.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
 - `logic/tests/run_skyline.rs`, `run_switchback.rs`, `run_helix.rs`: a scripted runner plays each race from the start to the finish with no fall. It pushes the stick and presses Jump and Slide, as a player does. Each level also finishes with every press early and late.
@@ -127,7 +143,7 @@ SCENE=wall BLOCK=ledge-mid UP=110 RELEASE=1 FILM=/tmp/film.jsonl cargo test --ma
 python3 tools/film.py /tmp/film.jsonl /tmp/film.png 0 250 4 8
 ```
 
-`SCENE` is `wall`, `jumps` or `gap`. The test's comment lists the other variables.
+`SCENE` is `wall`, `jumps`, `gap`, `slide` or `ramp`. The test's comment lists the other variables.
 
 `.cargo/config.toml` turns off debug assertions for the vendored `rapier3d` package only. Its island check panics when the player's kinematic capsule moves in the tick in which a rigid body starts a contact.
 

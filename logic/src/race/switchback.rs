@@ -66,7 +66,7 @@
 //! 15. The third fold. A jump south over the north alley at the one place where
 //!     the tall range of the east house leaves it open, and a turn west straight
 //!     after the landing.
-//! 16. Leg 4. A long stair up to the plant room. Checkpoint 8. A plank of 1 m on
+//! 16. Leg 4. A long stair up to the plant room. Checkpoint 8. A plank of 1.4 m on
 //!     a slant over the courtyard to the balcony of the tower.
 //! 17. The tower. Four steps wind round the shaft, anticlockwise: mantle, mantle,
 //!     a teal face of 2.2 m to climb, mantle. The finish is on the terrace at
@@ -504,7 +504,7 @@ fn east_house(level: &mut Level) {
         "tower-plank",
         [12.27, GALLERY + 0.03, -10.12],
         [6.73, GALLERY + 0.03, -7.63],
-        1.0,
+        1.4,
         0.3,
         Look::Beam,
     );

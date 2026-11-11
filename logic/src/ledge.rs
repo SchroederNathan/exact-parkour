@@ -126,6 +126,13 @@ pub fn ground(w: &World, point: Vec3, drop: f32) -> Option<f32> {
         .map(|hit| hit.point.y)
 }
 
+/// The upward normal of the ground under `point`, within `drop` metres below it.
+pub fn slope(w: &World, point: Vec3, drop: f32) -> Option<Vec3> {
+    physics::raycast(w, point, -Vec3::Y, drop, SOLID)
+        .filter(|hit| hit.normal.y > FLAT)
+        .map(|hit| hit.normal)
+}
+
 /// Half the width of the place a body stands on, metres: about a foot.
 pub const FOOTING: f32 = 0.1;
 

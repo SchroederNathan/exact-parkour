@@ -48,6 +48,8 @@ pub struct Climb {
     pub height: f32,
     /// The foot that steps onto the top first: +1 the left, -1 the right.
     pub first: f32,
+    /// How far the arms had gone up to the edge before the climb began, 0 to 1.
+    pub reach: f32,
     /// Out of a hang: how close to the wall the drawn body starts, how far the
     /// hang had shimmied, which is where its hands are, and how far it leaned
     /// past the end of the edge.
@@ -139,11 +141,10 @@ impl Climb {
         // A body that joins late has less time to get onto the course.
         let rate = RATE.max(4.5 / (SPAN - self.joined));
         (self.off, self.drift) = settle(self.off, self.drift, rate, dt);
-        // The wall stops what is left of a run at it.
+        // The wall stops what is left of a run at it: the body goes no further
+        // in, and comes back out as the rest dies away.
         let inward = self.ledge.inward();
-        let into = self.off.dot(inward);
-        if into > 0.0 {
-            self.off -= inward * into;
+        if self.off.dot(inward) > 0.0 {
             self.drift -= inward * self.drift.dot(inward).max(0.0);
         }
         let at = course(&self.ledge, self.time) + self.off;

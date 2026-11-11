@@ -231,27 +231,33 @@ fn weight(model: &Model, local: &[f32], hold: &Hold, target: Vec3) -> f32 {
 /// the holds does not jump: `flow` sees to that.
 #[derive(Default, Clone, Component)]
 pub struct Limbs {
-    /// For each limb of `Limb::ALL`, twenty floats. Where its wrist or ankle
-    /// was put last tick and the tick before, what it is off its place and how
-    /// fast that changes, all in the body's frame. Then where its hold was in
-    /// the world last tick and the tick before, how much of the hold it took,
-    /// and how many ticks in a row it has had a hold, to two.
+    /// For each limb of `Limb::ALL`, twenty-three floats. Where its wrist or
+    /// ankle was put last tick and the tick before, what it is off its place
+    /// and how fast that changes, all in the body's frame. Then where its hold
+    /// was in the world last tick and the tick before, how much of the hold it
+    /// took, how many ticks in a row it has had a hold, to two, and how much of
+    /// the hold its elbow or knee has taken, which follows the limb's share
+    /// late: two floats, the second following the first. Last, whether the
+    /// hold was changing too fast to follow on the last tick.
     state: Vec<f32>,
     /// The tick of that, and whether the tick before it is known too.
     tick: u64,
     moving: bool,
 }
 
-const ROW: usize = 20;
+const ROW: usize = 23;
 /// A hold that is this much further on in one tick than it was going, metres,
 /// has gone somewhere at once: a hold that goes with the body turns and stops
 /// with it, which is less than this. So has a hold that a limb takes so much
 /// more or less of that it moves the limb this far, metres.
 const SNAP: f32 = 0.07;
-const TAKEN: f32 = 0.09;
+const TAKEN: f32 = 0.06;
 /// How fast what a limb is off its place dies away, per second, and the fastest
 /// it is taken to have been going, m/s.
 const CATCH_UP: f32 = 30.0;
+/// How fast an elbow or a knee takes up or gives up the side its hold bends it
+/// to, per second. It follows twice over, so it starts and stops gently.
+const BEND: f32 = 22.0;
 const FASTEST: f32 = 7.0;
 
 /// Turn the limbs of the drawn body onto `holds`. Call after `animation::step`,
@@ -287,17 +293,16 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
             let [first, middle, tip] = joints(model, &local, limb);
             let hold = holds.iter().position(|hold| hold.limb == limb);
             // Where the hold has the wrist or ankle, and the elbow or knee.
-            let (want, pole, flat, held) = match hold {
+            let (want, bend, flat, held, firm) = match hold {
                 Some(i) => {
                     let hold = &holds[i];
                     let target = turn.inverse() * (hold.at - root);
                     let weight = weight(model, &local, hold, target);
                     taken[i] = weight;
                     let bend = (first + target) * 0.5 + hold.bend.unwrap_or(limb.bend());
-                    let want = tip.lerp(target, weight);
-                    (want, middle.lerp(bend, weight), weight * hold.flat, Some((hold.at, weight)))
+                    (tip.lerp(target, weight), bend, hold.flat, Some((hold.at, weight)), hold.firm)
                 }
-                None => (tip, middle, 0.0, None),
+                None => (tip, middle, 0.0, None, false),
             };
             let row = &mut limbs.state[index * ROW..(index + 1) * ROW];
             let (was, before) = (Vec3::from_slice(&row[..3]), Vec3::from_slice(&row[3..6]));
@@ -305,6 +310,16 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
             let (place, place_before) = (Vec3::from_slice(&row[12..15]), Vec3::from_slice(&row[15..18]));
             let (took, run) = (row[18], if known { row[19] } else { 0.0 });
             let (weight, place_now) = held.map_or((0.0, place), |(at, weight)| (weight, at));
+            // The elbow or knee goes to its side, and the foot goes flat, as
+            // fast as the limb takes the hold, but not at once.
+            let follow = 1.0 - math::exp(-BEND * dt);
+            let (first_share, share) = if firm || !known {
+                (weight, weight)
+            } else {
+                let first_share = row[20] + (weight - row[20]) * follow;
+                (first_share, row[21] + (first_share - row[21]) * follow)
+            };
+            let (pole, flat) = (middle.lerp(bend, share), share * flat);
             if !known {
                 (off, drift) = (Vec3::ZERO, Vec3::ZERO);
             } else {
@@ -317,10 +332,15 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
                     _ => false,
                 };
                 let lever = held.map_or(was, |(at, _)| turn.inverse() * (at - root)) - tip;
-                let firm = hold.is_some_and(|i| holds[i].firm);
+                // A hold that changes too fast goes on doing so for some ticks.
+                // The limb keeps to its own way through all of them, and not
+                // through every other one, which would shake it.
+                let taking = (weight - took).abs() * lever.length();
+                let fast = jumped || taking > if row[22] > 0.0 { TAKEN / 3.0 } else { TAKEN };
+                row[22] = if fast && !firm { 1.0 } else { 0.0 };
                 if firm {
                     (off, drift) = (Vec3::ZERO, Vec3::ZERO);
-                } else if jumped || (weight - took).abs() * lever.length() > TAKEN {
+                } else if fast {
                     off = was - want;
                     let going = if moving { (was - before) / dt } else { Vec3::ZERO };
                     drift = going.clamp_length_max(FASTEST);
@@ -335,6 +355,8 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
             row[15..18].copy_from_slice(&place.to_array());
             row[12..15].copy_from_slice(&place_now.to_array());
             row[18] = weight;
+            row[20] = first_share;
+            row[21] = share;
             row[19] = if held.is_some() { (run + 1.0).min(2.0) } else { 0.0 };
             let at = want + off;
             row[3..6].copy_from_slice(&was.to_array());
