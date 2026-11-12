@@ -203,3 +203,330 @@ fn a_stand_is_the_same_on_both_sides_and_the_hands_are_by_the_thighs() {
         }
     }
 }
+
+// Every joint of the drawn body through every move, tick by tick.
+mod fluid {
+    use super::*;
+    use exact_beat_em_up_logic::body::Parkour;
+    use exact_beat_em_up_logic::{debug, park};
+    use exact_game::animation::joint_matrix;
+    use exact_game::Transform;
+    use exact_game_physics::CapsuleController;
+
+    const TICK_MS: f64 = 8.334;
+
+    /// The most that a joint went in one tick, and the most that its step changed
+    /// from one tick to the next, both in the body's own frame, metres. With them
+    /// the joint, the tick and what the body did then.
+    #[derive(Default)]
+    pub struct Worst {
+        pub step: (f32, String),
+        pub change: (f32, String),
+    }
+
+    pub struct Watch {
+        pub game: Game,
+        names: Vec<String>,
+        before: Vec<Vec3>,
+        step: Vec<Vec3>,
+        known: u32,
+        tick: usize,
+        pub worst: Worst,
+    }
+
+    impl Watch {
+        pub fn new(character: u32) -> Self {
+            let mut game = start(character);
+            // No roller comes down the ramp into the scene.
+            let w = game.world_mut();
+            let rollers: Vec<_> = w.query::<&park::Roller>().iter().map(|(e, _)| e).collect();
+            for roller in rollers {
+                w.despawn(roller);
+            }
+            w.resource_mut::<park::Ramp>().released = u32::MAX;
+            let names = stickman::rig(body::HEIGHT).bones().iter().map(|b| b.name.clone()).collect();
+            Watch { game, names, before: vec![], step: vec![], known: 0, tick: 0, worst: Worst::default() }
+        }
+
+        /// Stand the body with its feet at `at`, facing `yaw` radians. What the
+        /// joints did before is forgotten: the body was put there, it did not go.
+        pub fn place(&mut self, at: Vec3, yaw: f32) {
+            let w = self.game.world_mut();
+            w.require_mut::<Transform>("player").position = at + Vec3::Y * (body::HALF + 0.02);
+            *w.require_mut::<Parkour>("player") = Parkour { yaw, ..Parkour::default() };
+            let mut capsule = w.require_mut::<CapsuleController>("player");
+            capsule.velocity = Vec3::ZERO;
+            capsule.grounded = false;
+            capsule.support = None;
+            drop(capsule);
+            self.known = 0;
+            // The pose settles from the placing before it is watched.
+            for _ in 0..30 {
+                self.game.run(TICK_MS);
+            }
+        }
+
+        /// Hold the move stick part of the way out, as `debug`'s `stick` does.
+        pub fn stick(&mut self, x: f32, y: f32) {
+            *self.game.world_mut().resource_mut::<debug::Stick>() =
+                debug::Stick { held: x != 0.0 || y != 0.0, x, y };
+        }
+
+        fn joints(&self) -> Vec<Vec3> {
+            let world = self.game.world();
+            let model = world.model(stickman::MODEL).unwrap();
+            let pose = world.get::<Pose>("stickman").unwrap();
+            (0..self.names.len())
+                .map(|joint| joint_matrix(model, &pose.local, joint as u32).w_axis.truncate())
+                .collect()
+        }
+
+        pub fn doing(&self) -> String {
+            let action = format!("{:?}", self.game.world().require::<Parkour>("player").action);
+            action.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string()
+        }
+
+        /// Run `ms` of the game and watch every joint on every tick.
+        pub fn run(&mut self, ms: f64) {
+            for _ in 0..(ms / TICK_MS).round() as usize {
+                self.game.run(TICK_MS);
+                self.tick += 1;
+                let doing = self.doing();
+                // A ragdoll is not a pose: the physics moves its points.
+                if doing == "Ragdoll" {
+                    self.known = 0;
+                    continue;
+                }
+                let now = self.joints();
+                let step: Vec<Vec3> = if self.known >= 1 {
+                    now.iter().zip(&self.before).map(|(a, b)| *a - *b).collect()
+                } else {
+                    vec![]
+                };
+                for (joint, moved) in step.iter().enumerate() {
+                    let label = || format!("{} at tick {} in {doing}", self.names[joint], self.tick);
+                    if moved.length() > self.worst.step.0 {
+                        self.worst.step = (moved.length(), label());
+                    }
+                    if self.known >= 2 {
+                        let change = (*moved - self.step[joint]).length();
+                        if change > self.worst.change.0 {
+                            self.worst.change = (change, label());
+                        }
+                    }
+                }
+                // FLUID_JOINT=shin_l FLUID_FROM=380 FLUID_TO=400 prints that joint's place.
+                if let Ok(joint) = std::env::var("FLUID_JOINT") {
+                    let number = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<usize>().ok());
+                    if (number("FLUID_FROM").unwrap_or(0)..=number("FLUID_TO").unwrap_or(usize::MAX)).contains(&self.tick) {
+                        let world = self.game.world();
+                        let body = world.require::<Parkour>("player");
+                        let speed = world.require::<CapsuleController>("player").velocity;
+                        for part in joint.split(',') {
+                            let index = self.names.iter().position(|n| n == part).unwrap();
+                            print!("{part} {:.3} {:.3} {:.3}  ", now[index].x, now[index].y, now[index].z);
+                        }
+                        println!("| tick {} {doing} tilt {:.3} speed {:.2} {:.2}", self.tick, body.tilt.length(), Vec3::new(speed.x, 0.0, speed.z).length(), speed.y);
+                    }
+                }
+                self.before = now;
+                self.step = step;
+                self.known = (self.known + 1).min(2);
+            }
+        }
+
+        /// Run until the body does `what`, for `ms` at most. Returns whether it did.
+        pub fn until(&mut self, what: &str, ms: f64) -> bool {
+            for _ in 0..(ms / TICK_MS).round() as usize {
+                if self.doing() == what {
+                    return true;
+                }
+                self.run(TICK_MS);
+            }
+            self.doing() == what
+        }
+    }
+}
+
+// One scene of the body's moves: what it is called, and the keys of it.
+type Scene = (&'static str, fn(&mut fluid::Watch));
+
+const NORTH: f32 = std::f32::consts::PI;
+
+fn scenes() -> Vec<Scene> {
+    let scenes: Vec<Scene> = vec![
+        ("stand, walk, run, sprint and stop", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-6.0, 0.0, 26.0), NORTH);
+            s.run(700.0);
+            s.stick(0.0, 0.25);
+            s.run(1500.0);
+            s.stick(0.0, 0.5);
+            s.run(1500.0);
+            s.stick(0.0, 0.0);
+            s.game.key_down("KeyW");
+            s.run(1500.0);
+            s.game.key_down("ShiftLeft");
+            s.run(1500.0);
+            s.game.key_up("ShiftLeft");
+            s.run(1000.0);
+            s.game.key_up("KeyW");
+            s.run(1200.0);
+        }),
+        ("a stop out of a sprint, and an about-face", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-6.0, 0.0, 26.0), NORTH);
+            s.game.key_down("ShiftLeft");
+            s.game.key_down("KeyW");
+            s.run(1500.0);
+            s.game.key_up("KeyW");
+            s.game.key_up("ShiftLeft");
+            s.run(1200.0);
+            s.game.key_down("KeyW");
+            s.run(1000.0);
+            s.game.key_up("KeyW");
+            s.game.key_down("KeyS");
+            s.run(1500.0);
+            s.game.key_up("KeyS");
+            s.game.key_down("KeyD");
+            s.run(1000.0);
+            s.game.key_up("KeyD");
+            s.run(800.0);
+        }),
+        ("jumps from a stand, a run and a sprint", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-6.0, 0.0, 26.0), NORTH);
+            s.run(300.0);
+            s.game.tap("Space");
+            s.run(1300.0);
+            s.game.key_down("KeyW");
+            s.run(900.0);
+            s.game.tap("Space");
+            s.run(1300.0);
+            s.game.key_down("ShiftLeft");
+            s.run(900.0);
+            s.game.tap("Space");
+            s.run(1400.0);
+            s.game.tap("Space");
+            s.run(1400.0);
+        }),
+        ("a slide out of a sprint, into a run", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-6.0, 0.0, 26.0), NORTH);
+            s.game.key_down("ShiftLeft");
+            s.game.key_down("KeyW");
+            s.run(1200.0);
+            s.game.tap("KeyC");
+            assert!(s.until("Slide", 300.0), "no slide, {}", s.doing());
+            s.run(1600.0);
+        }),
+        ("a vault over a wall", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-2.0, 0.0, -3.4), NORTH);
+            s.game.key_down("KeyW");
+            s.run(380.0);
+            s.game.tap("Space");
+            assert!(s.until("Vault", 500.0), "no vault, {}", s.doing());
+            s.run(1500.0);
+        }),
+        ("a climb onto a deep wall", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(6.5, 0.0, -3.4), NORTH);
+            s.game.key_down("KeyW");
+            s.run(380.0);
+            s.game.tap("Space");
+            assert!(s.until("Climb", 500.0), "no climb, {}", s.doing());
+            s.run(1800.0);
+        }),
+        ("a catch, a hang, a shimmy and a climb", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-3.0, 0.0, -10.3), NORTH);
+            s.game.key_down("KeyW");
+            s.run(260.0);
+            s.game.tap("Space");
+            assert!(s.until("Hang", 900.0), "no hang, {}", s.doing());
+            s.run(900.0);
+            s.game.key_up("KeyW");
+            s.game.key_down("KeyD");
+            s.run(1200.0);
+            s.game.key_up("KeyD");
+            s.game.key_down("KeyA");
+            s.run(900.0);
+            s.game.key_up("KeyA");
+            s.game.key_down("KeyW");
+            s.game.tap("Space");
+            assert!(s.until("Climb", 500.0), "no climb, {}", s.doing());
+            s.run(1800.0);
+        }),
+        ("a hang, and a drop from it", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-3.0, 0.0, -10.3), NORTH);
+            s.game.key_down("KeyW");
+            s.run(260.0);
+            s.game.tap("Space");
+            assert!(s.until("Hang", 900.0), "no hang, {}", s.doing());
+            s.run(600.0);
+            s.game.key_up("KeyW");
+            s.game.key_down("KeyS");
+            s.run(1500.0);
+        }),
+        ("landings from 0.7, 1.6 and 3.2 m at a stand", |s: &mut fluid::Watch| {
+            for height in [0.7, 1.6, 3.2] {
+                s.place(Vec3::new(-6.0, 0.0, 22.0), NORTH);
+                let w = s.game.world_mut();
+                w.require_mut::<exact_game::Transform>("player").position.y += height;
+                s.run(2600.0);
+            }
+        }),
+        ("landings from 1.6 and 3.2 m at a run", |s: &mut fluid::Watch| {
+            for height in [1.6, 3.2] {
+                s.place(Vec3::new(-6.0, 0.0, 26.0), NORTH);
+                s.game.key_down("KeyW");
+                s.run(700.0);
+                let w = s.game.world_mut();
+                w.require_mut::<exact_game::Transform>("player").position.y += height;
+                s.run(2600.0);
+                s.game.key_up("KeyW");
+                s.run(600.0);
+            }
+        }),
+        ("the stairs, up and down", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(6.0, 0.0, 2.6), 0.0);
+            s.game.key_down("KeyS");
+            s.run(2600.0);
+            s.game.key_up("KeyS");
+            s.game.key_down("KeyW");
+            s.run(2600.0);
+        }),
+        ("a stand for six seconds", |s: &mut fluid::Watch| {
+            s.place(Vec3::new(-6.0, 0.0, 22.0), NORTH);
+            s.run(6000.0);
+        }),
+    ];
+    scenes
+}
+
+#[test]
+fn every_joint_goes_smoothly_through_every_move() {
+    // A sprint's knee goes 0.07 m in a tick, and its foot's step changes by
+    // 0.04 m when it meets the ground. The head of a body that rolls goes
+    // 0.11 m. A joint that is somewhere else at once does several times that:
+    // before the limbs were made to go straight gently, a knee went 0.19 m in
+    // one tick of a climb and changed its step by 0.16 m at a landing.
+    const FURTHEST: f32 = 0.12;
+    const SHARPEST: f32 = 0.09;
+    let mut failures = vec![];
+    for character in [0, 1] {
+        for (name, keys) in scenes() {
+            if std::env::var("FLUID_SCENE").is_ok_and(|only| !name.contains(&only)) {
+                continue;
+            }
+            let mut watch = fluid::Watch::new(character);
+            keys(&mut watch);
+            let worst = &watch.worst;
+            println!(
+                "character {character}, {name}: furthest {:.3} m ({}), sharpest {:.3} m ({})",
+                worst.step.0, worst.step.1, worst.change.0, worst.change.1
+            );
+            if worst.step.0 > FURTHEST {
+                failures.push(format!("character {character}, {name}: {} went {} m in a tick", worst.step.1, worst.step.0));
+            }
+            if worst.change.0 > SHARPEST {
+                failures.push(format!("character {character}, {name}: {} changed its step by {} m", worst.change.1, worst.change.0));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

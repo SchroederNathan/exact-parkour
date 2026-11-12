@@ -20,8 +20,10 @@ The trunk and the legs keep their shape: the game's joints are put inside them.
 
 import math
 
+import bmesh
 import bpy
 import numpy as np
+from mathutils.bvhtree import BVHTree
 
 HEIGHT = 1.8
 TEXTURE = 1024
@@ -88,8 +90,8 @@ LOWER = 0.02
 # The knuckles' place along the hand, the turn of a fingertip toward the palm
 # (radians), and how far the fingers close toward the middle one.
 KNUCKLES = 0.45
-CURL = math.radians(65.0)
-CLOSE = 0.25
+CURL = math.radians(100.0)
+CLOSE = 0.3
 # Where the collar bone hands a vertex to the arm: from this far before the
 # shoulder joint to this far past it, along the arm, metres.
 SHOULDER = (-0.03, 0.09)
@@ -97,6 +99,120 @@ SHOULDER = (-0.03, 0.09)
 # toward the front for each metre.
 JAW = 1.60
 JAW_SLOPE = 0.3
+
+
+# The socks: how high they come up the leg, metres, their colour, the height of
+# the darker band at the top, and how far along a foot the toe box starts and
+# is complete.
+SOCK = 0.21
+SOCK_COLOUR = np.array([0.84, 0.83, 0.80])
+SOCK_BAND = 0.03
+TOE_BOX = (0.52, 0.68)
+TOE_ROUND = 6
+# How far under the cap the old toes go, metres.
+TOE_UNDER = 0.004
+
+
+def toe_box(points, triangles):
+    """The round end of a sock over the toes of one foot.
+
+    `points` are the foot's vertices and `triangles` its faces. Meshy's toes are
+    separate lumps with open gaps between them, so no move of their vertices
+    makes one surface. The sock's end is a new piece: the hull of the front of
+    the foot, made round. Toward the instep it lies down on the foot, and the
+    toes go just inside it. Returns the foot's vertices, the cap's vertices and
+    the cap's faces.
+    """
+    heel, tip = points[:, 2].min(), points[:, 2].max()
+
+    def along(z):
+        return (z - heel) / (tip - heel)
+
+    front = along(points[:, 2]) > TOE_BOX[0] - 0.08
+    hull = bmesh.new()
+    for point in points[front]:
+        hull.verts.new(point)
+    bmesh.ops.convex_hull(hull, input=hull.verts)
+    # The hull has a corner at the tip of each toe. More, smaller faces and a few
+    # passes of smoothing make it one round end. The sole stays flat on the ground.
+    bmesh.ops.triangulate(hull, faces=hull.faces)
+    bmesh.ops.subdivide_edges(hull, edges=hull.edges, cuts=1, use_grid_fill=True)
+    bmesh.ops.triangulate(hull, faces=hull.faces)
+    ground = points[:, 1].min()
+    for _ in range(TOE_ROUND):
+        bmesh.ops.smooth_vert(hull, verts=hull.verts, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+        for vertex in hull.verts:
+            vertex.co.y = max(vertex.co.y, ground)
+    bmesh.ops.recalc_face_normals(hull, faces=hull.faces)
+    round_end = BVHTree.FromBMesh(hull)
+    skin = BVHTree.FromPolygons([p.tolist() for p in points], [list(t) for t in triangles])
+
+    # The toes go under the cap, and the cap lies down on the foot behind them.
+    middle = np.array([v.co[:] for v in hull.verts]).mean(axis=0)
+    inner = points.copy()
+    for index in np.nonzero(front)[0]:
+        nearest = np.array(round_end.find_nearest(points[index].tolist())[0])
+        under = nearest + TOE_UNDER * unit(middle - nearest)
+        inner[index] += smoothstep(TOE_BOX[0], TOE_BOX[1], along(points[index][2])) * (under - points[index])
+    hull.verts.ensure_lookup_table()
+    cap = []
+    for vertex in hull.verts:
+        at = np.array(vertex.co[:])
+        on_foot = np.array(skin.find_nearest(at.tolist())[0])
+        cap.append(on_foot + smoothstep(TOE_BOX[0] - 0.04, TOE_BOX[1], along(at[2])) * (at - on_foot))
+    faces = [[v.index for v in face.verts] for face in hull.faces]
+    hull.free()
+    return inner, np.array(cap), faces
+
+
+def paint_socks(mesh, image, depth):
+    """Paint the texture a sock's colour wherever `depth` is positive.
+
+    `depth` is, for each vertex, how far under the top of the sock it is, metres;
+    it is negative above the top and for a vertex that is not on a leg. A texel
+    takes the depth of its place in its triangle, so the top is a clean line.
+    """
+    width, height = image.size
+    pixels = np.array(image.pixels[:], dtype=np.float32).reshape(height, width, 4)
+    uvs = np.empty(len(mesh.loops) * 2)
+    mesh.uv_layers.active.data.foreach_get("uv", uvs)
+    uvs = uvs.reshape(-1, 2) * (width, height) - 0.5
+    mesh.calc_loop_triangles()
+    painted = np.zeros((height, width), dtype=bool)
+    shade = pixels[:, :, :3] @ np.array([0.3, 0.59, 0.11])
+    target = np.zeros((height, width), dtype=np.float32)
+    for triangle in mesh.loop_triangles:
+        deep = depth[list(triangle.vertices)]
+        if deep.max() <= 0.0:
+            continue
+        a, b, c = uvs[list(triangle.loops)]
+        low = np.floor(np.minimum(np.minimum(a, b), c)).astype(int) - 2
+        high = np.ceil(np.maximum(np.maximum(a, b), c)).astype(int) + 2
+        xs, ys = np.meshgrid(np.arange(low[0], high[0] + 1), np.arange(low[1], high[1] + 1))
+        area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+        if abs(area) < 1e-9:
+            continue
+        u = ((xs - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (ys - a[1])) / area
+        v = ((b[0] - a[0]) * (ys - a[1]) - (xs - a[0]) * (b[1] - a[1])) / area
+        # Two texels past the edge, so that no skin shows at a seam of the texture.
+        edge = 2.0 / math.sqrt(abs(area))
+        inside = (u >= -edge) & (v >= -edge) & (u + v <= 1.0 + edge)
+        value = deep[0] + u * (deep[1] - deep[0]) + v * (deep[2] - deep[0])
+        hit = inside & (value > 0.0)
+        xs, ys = xs[hit] % width, ys[hit] % height
+        painted[ys, xs] = True
+        target[ys, xs] = value[hit]
+    if not painted.any():
+        raise ValueError("no texel of the texture is on a sock")
+    # The cloth keeps a little of the light and shade that the skin had there.
+    light = shade[painted] / max(float(shade[painted].mean()), 1e-6)
+    cloth = np.clip(0.94 + 0.06 * light, 0.92, 1.03)
+    band = np.where(target[painted] < SOCK_BAND, 0.86, 1.0)
+    pixels[painted, :3] = np.clip(SOCK_COLOUR * (cloth * band)[:, None], 0.0, 1.0)
+    image.pixels.foreach_set(pixels.ravel())
+    image.update()
+    image.pack()
+    return int(painted.sum())
 
 
 def smoothstep(low, high, x):
@@ -339,6 +455,23 @@ def fit(source, out, name):
 
     posed = blend_rigid(shaped, raw, turns, moves)
 
+    # Socks hide the toes, which Meshy makes from too few triangles to look right.
+    mesh.calc_loop_triangles()
+    corners = np.empty(len(mesh.loop_triangles) * 3, dtype=np.int64)
+    mesh.loop_triangles.foreach_get("vertices", corners)
+    corners = corners.reshape(-1, 3)
+    legs, caps = {}, {}
+    for meshy_side, side, outward in sides:
+        leg = share(f"{meshy_side}UpLeg", f"{meshy_side}Leg", f"{meshy_side}Foot", f"{meshy_side}ToeBase") > 0.5
+        legs[side] = leg
+        foot = leg & (posed[:, 1] < ANKLE[0] + 0.03)
+        number = np.full(count, -1)
+        number[foot] = np.arange(int(foot.sum()))
+        triangles = number[corners[foot[corners].all(axis=1)]]
+        posed[foot], cap, faces = toe_box(posed[foot], triangles)
+        caps[side] = (cap, faces)
+    in_sock = np.where(legs["l"] | legs["r"], SOCK - posed[:, 1], -1.0)
+
     # The game's weights: each Meshy joint's go to the game joint that moves that part.
     column = {n: i for i, n in enumerate(NAMES)}
     weights = np.zeros((count, len(NAMES)))
@@ -415,6 +548,31 @@ def fit(source, out, name):
         for slot in range(4):
             if kept[vertex, slot] > 0.0:
                 groups[int(order[vertex, slot])].add([vertex], float(kept[vertex, slot]), "REPLACE")
+    # The caps of the socks: each follows its foot, and all of a cap takes the
+    # colour of one texel of the sock.
+    sock_at = int(np.argmax(np.where((in_sock > SOCK_BAND + 0.02) & (in_sock < SOCK - 0.08), posed[:, 2], -np.inf)))
+    whole = bmesh.new()
+    whole.from_mesh(new)
+    uv = whole.loops.layers.uv.verify()
+    follow = whole.verts.layers.deform.verify()
+    whole.verts.ensure_lookup_table()
+    colour = whole.verts[sock_at].link_loops[0][uv].uv.copy()
+    for side, (cap, faces) in caps.items():
+        made = []
+        for at in cap:
+            vertex = whole.verts.new(blender(at))
+            vertex[follow][groups[column[f"foot_{side}"]].index] = 1.0
+            made.append(vertex)
+        for face in faces:
+            added = whole.faces.new([made[i] for i in face])
+            added.smooth = True
+            added.material_index = 0
+            for loop in added.loops:
+                loop[uv].uv = colour
+    whole.to_mesh(new)
+    whole.free()
+    new.update()
+
     fitted.parent = rig
     fitted.modifiers.new("rig", "ARMATURE").object = rig
 
@@ -430,6 +588,10 @@ def fit(source, out, name):
                 if max(node.image.size) > TEXTURE:
                     node.image.scale(TEXTURE, TEXTURE)
                     node.image.pack()
+                # The caps have no texels of their own.
+                depth = np.concatenate([in_sock, np.full(len(new.vertices) - count, -1.0)])
+                texels = paint_socks(new, node.image, depth)
+                print(f"  socks: {texels} texels")
 
     for o in list(scene.objects):
         if o not in (rig, fitted):

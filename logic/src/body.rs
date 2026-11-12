@@ -86,6 +86,10 @@ pub const SETTLE: f32 = 0.25;
 const SWUNG_IN: f32 = 0.38;
 /// How far from its shoulder a hand goes toward an edge it cannot reach, metres.
 const ARM: f32 = 0.5;
+/// The length of a leg from the hip to the ankle, and how much short of it a
+/// leg that reaches for the ground stays, metres.
+const LEG: f32 = 0.88 * HEIGHT / 1.8;
+const KNEE_GIVE: f32 = 0.04;
 const CATCH: f32 = 14.0;
 /// How much closer to the wall than the capsule the drawn body hangs, metres: the
 /// capsule is as thick as the body with its arms, and a hanging body is flat.
@@ -499,7 +503,7 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
         body.glide = false;
     }
     let controls = Controls {
-        wish: crate::camera::movement(w, planar(input.stick_xz("move"))).clamp_length_max(1.0),
+        wish: crate::camera::movement(w, planar(crate::debug::stick_xz(w, input))).clamp_length_max(1.0),
         jump: input.pressed("jump") || said("touch jump"),
         sprint: input.held("sprint") || body.glide,
         slide: input.pressed("slide") || said("touch slide"),
@@ -1214,8 +1218,10 @@ fn grips(ledge: &Ledge, travel: f32, lean: f32) -> [Hold; 2] {
         let along = side * HANDS + HAND_STEP * (whole + smooth(swing)) - travel;
         let lift = 0.04 * math::sin(std::f32::consts::PI * swing);
         let lets_go = (-side * lean).max(0.0);
+        // The hand lies on the top, its fingers in from the edge.
         Hold::new(limb, over + ledge.left() * along + Vec3::Y * lift)
             .grip(1.0 - smooth(lets_go / 0.6))
+            .palm(ledge.inward())
     };
     [
         hand(Limb::HandL, 1.0, cycle),
@@ -1256,7 +1262,7 @@ pub fn holds(w: &World) -> Vec<Hold> {
                     let shoulder = hold::joint(w, hand.limb.chain()[0]);
                     let to = hand.at - shoulder;
                     let at = shoulder + to.normalize_or_zero() * to.length().min(ARM);
-                    Hold::new(hand.limb, at).grip(smooth(body.reach))
+                    Hold { at, ..hand }.grip(smooth(body.reach))
                 }));
             }
             // With the ground coming, the leading leg opens toward the place its
@@ -1277,8 +1283,14 @@ pub fn holds(w: &World) -> Vec<Hold> {
                     let ahead = strides[leg].map_or(0.0, |(ahead, _)| ahead);
                     let at = feet + facing * ahead + left * (0.09 * side);
                     let floor = ledge::ground(w, at + Vec3::Y * 0.5, 2.5).unwrap_or(feet.y);
+                    // The leg reaches for the ground with its knee a little bent.
+                    // A straight leg that meets the ground has a knee that goes
+                    // a hand's width in the tick the hips come down.
+                    let hip = hold::joint(w, limb.chain()[0]);
+                    let to = Vec3::new(at.x, floor + hold::ANKLE, at.z) - hip;
+                    let at = hip + to.clamp_length_max(LEG - KNEE_GIVE);
                     holds.push(
-                        Hold::new(limb, Vec3::new(at.x, floor + hold::ANKLE, at.z))
+                        Hold::new(limb, at)
                             .grip(grip * smooth(body.brace / 0.5))
                             .slack(0.45),
                     );
@@ -1313,6 +1325,12 @@ pub fn holds(w: &World) -> Vec<Hold> {
             // comes off the ground and the other goes down.
             let lean = slide.lean * slide.riding();
             let (to_left, to_right) = (lean.max(0.0), (-lean).max(0.0));
+            // A hand goes down to the ground with its elbow a little bent, as a
+            // foot does: the shoulder comes down onto it fast.
+            let near = |limb: Limb, at: Vec3| {
+                let shoulder = hold::joint(w, limb.chain()[0]);
+                shoulder + (at - shoulder).clamp_length_max(ARM + 0.02)
+            };
             let down = between(0.1, 0.3, 0.7, 0.86);
             vec![
                 // Each of these eases in and out by its own grip.
@@ -1323,12 +1341,12 @@ pub fn holds(w: &World) -> Vec<Hold> {
                     .grip(between(0.12, 0.3, 0.76, 0.92))
                     .loose()
                     .firm(),
-                Hold::new(Limb::HandL, on(-0.46, 0.4 + 0.1 * to_left, hold::WRIST))
+                Hold::new(Limb::HandL, near(Limb::HandL, on(-0.46, 0.4 + 0.1 * to_left, hold::WRIST)))
                     .grip(down * (1.0 - smooth(to_right / 0.8)))
                     .slack(0.6)
                     .bend(Vec3::new(0.5, 0.1, -0.6))
                     .firm(),
-                Hold::new(Limb::HandR, on(-0.42, -0.42, hold::WRIST))
+                Hold::new(Limb::HandR, near(Limb::HandR, on(-0.42, -0.42, hold::WRIST)))
                     .grip(down * smooth(to_right / 0.8))
                     .slack(0.6)
                     .bend(Vec3::new(-0.5, 0.1, -0.6))
@@ -1336,7 +1354,11 @@ pub fn holds(w: &World) -> Vec<Hold> {
             ]
         }
         // The hand starts for the wall's top well before the shoulder is over it.
-        Action::Vault(path) if path.held => vec![Hold::new(Limb::HandL, path.hand).slack(0.9).firm()],
+        // It lies on the top with its fingers the way the body goes over.
+        Action::Vault(path) if path.held => vec![Hold::new(Limb::HandL, path.hand)
+            .slack(0.9)
+            .firm()
+            .palm(path.to - path.from)],
         Action::Climb(climb) => {
             let ledge = &climb.ledge;
             let (t, joined) = (climb.time, climb.joined);
@@ -1433,7 +1455,8 @@ pub fn holds(w: &World) -> Vec<Hold> {
                         .lerp(Vec3::new(side * 0.3, 0.3, -0.25), press);
                     let hold = Hold::new(hand.limb, hand.at + onto)
                         .grip(hand.grip * arrives * needed * lets_go)
-                        .bend(elbow);
+                        .bend(elbow)
+                        .palm(ledge.inward());
                     if on {
                         hold.firm()
                     } else {

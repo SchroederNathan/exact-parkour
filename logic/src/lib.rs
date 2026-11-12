@@ -119,11 +119,13 @@ impl Game for ExactBeatEmUp {
         arena::register(w);
         camera::register(w);
         w.register_resource::<TouchStick>();
+        debug::register(w);
     }
 
     fn setup(w: &mut World, args: &Options) {
         w.reseed(args.seed);
         w.insert_resource(TouchStick::default());
+        w.insert_resource(debug::Stick::default());
         let sky = Color::hex("#9bb8c7");
         w.insert_resource(Environment {
             background: Some(sky),

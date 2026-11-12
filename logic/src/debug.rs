@@ -9,10 +9,39 @@
 //!   fourth number raises the point it looks at: `camera 0.6 0.1 -0.6 -0.8` is a
 //!   close view of the feet.
 //! - `roller <kind> <speed>`: send roller `kind` at the body from behind its back.
+//! - `clear`: take a race's blocks out of the world, which leaves the park.
+//! - `stick <x> <y>`: hold the move stick there, each from -1 to 1, until
+//!   `stick 0 0`. A key holds the stick all the way out; this holds it part of
+//!   the way, which is a walk.
 use crate::body::{self, Parkour};
 use crate::park;
 use exact_game::*;
 use exact_game_physics::CapsuleController;
+
+/// The move stick as the `stick` command holds it. A stick that is not held is
+/// the player's.
+#[derive(Default, Resource)]
+pub struct Stick {
+    pub held: bool,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Register the held stick. Call from `Game::register`.
+pub fn register(w: &mut World) {
+    w.register_resource::<Stick>();
+}
+
+/// The move stick on the ground plane: the one that `stick` holds, or else the
+/// player's. Positive Y of the stick is forward.
+pub fn stick_xz(w: &World, input: &Input) -> Vec3 {
+    let stick = w.resource::<Stick>();
+    if stick.held {
+        Vec3::new(stick.x, 0.0, -stick.y).clamp_length_max(1.0)
+    } else {
+        input.stick_xz("move")
+    }
+}
 
 fn numbers(words: &[&str]) -> Option<Vec<f32>> {
     words.iter().map(|w| w.parse().ok()).collect()
@@ -50,6 +79,14 @@ pub fn commands(w: &mut World, input: &Input) {
             }
             ("camera", &[x, y, z, lift]) => {
                 crate::camera::look_at(w, Vec3::new(x, y, z), lift);
+            }
+            ("clear", &[]) => crate::race::clear(w),
+            ("stick", &[x, y]) => {
+                *w.resource_mut::<Stick>() = Stick {
+                    held: x != 0.0 || y != 0.0,
+                    x,
+                    y,
+                };
             }
             ("roller", &[kind, speed]) => {
                 let (at, yaw) = {

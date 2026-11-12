@@ -81,6 +81,9 @@ pub struct Hold {
     /// Whether the limb is put where the hold has it with no catching up: for
     /// a hold whose own reach already brings the limb to it in time.
     pub firm: bool,
+    /// For a hand that lies on what it holds: the way its fingers point, in the
+    /// world. The palm is down. A hand with none keeps the pose's turn.
+    pub palm: Option<Vec3>,
 }
 impl Hold {
     pub fn new(limb: Limb, at: Vec3) -> Self {
@@ -92,7 +95,12 @@ impl Hold {
             bend: None,
             slack: SLACK,
             firm: false,
+            palm: None,
         }
+    }
+    pub fn palm(mut self, fingers: Vec3) -> Self {
+        self.palm = Some(fingers);
+        self
     }
     pub fn firm(mut self) -> Self {
         self.firm = true;
@@ -239,7 +247,23 @@ pub fn replace(w: &mut World, placed: &[(Limb, Vec3, Quat)], moved: f32) {
         let model = w.model(MODEL).expect("the stick man's model is generated in setup");
         for &(limb, target, turn) in placed {
             let chain = limb.chain();
-            let [_, middle, tip] = joints(model, &local, limb);
+            let [first, middle, tip] = joints(model, &local, limb);
+            // A limb that is pulled straight goes straight gently. Its elbow or
+            // knee is off the line from end to end by the square root of what
+            // the limb still has to give, so the last of the way to straight is
+            // all at once: a knee that was a hand's width out is on the line a
+            // tick later. The limb gives what the pose left it by halves, and is
+            // never quite straight.
+            let (own, reach) = (first.distance(tip), first.distance(middle) + middle.distance(tip));
+            let to = target - first;
+            let far = to.length();
+            let target = if far > own {
+                let room = (reach - own).max(0.0);
+                let given = if room > 1e-5 { room * (1.0 - math::exp(-(far - own) / room)) } else { 0.0 };
+                first + to / far * (own + given)
+            } else {
+                target
+            };
             if tip != target {
                 let ik = Ik {
                     chain: chain.map(String::from),
@@ -290,6 +314,49 @@ fn weight(model: &Model, local: &[f32], hold: &Hold, target: Vec3) -> f32 {
     hold.grip.clamp(0.0, 1.0) * (1.0 - smooth(beyond / hold.slack))
 }
 
+/// How far the fingers of a hand that lies on a surface are tilted up from it,
+/// radians: the heel of the hand is on the surface, the knuckles are off it and
+/// the tips of the curled fingers come down onto it.
+const KNUCKLES: f32 = 0.3;
+
+// Lay the hand of `limb` palm down, its fingers along `fingers` in the body's
+// frame, by `share` of the way from where the pose has it. Half of the turn
+// about the forearm's length goes to the forearm, which turns at the elbow and
+// keeps the wrist where it is: a wrist that takes all of it is wrung thin.
+fn lay(model: &Model, local: &mut [f32], limb: Limb, fingers: Vec3, share: f32) {
+    let level = Vec3::new(fingers.x, 0.0, fingers.z).normalize_or_zero();
+    if share <= 0.0 || level == Vec3::ZERO {
+        return;
+    }
+    let chain = limb.chain();
+    let (sin, cos) = math::sin_cos(KNUCKLES);
+    let (along, palm) = (level * cos + Vec3::Y * sin, level * sin - Vec3::Y * cos);
+    // At rest the fingers are along -Y of the hand, and the palm faces the body.
+    let (x, y) = (palm * -limb.side(), -along);
+    let turn = Mat4::from_cols(x.extend(0.0), y.extend(0.0), x.cross(y).extend(0.0), Vec4::W);
+    let want = turn.to_scale_rotation_translation().1;
+    let turn_of = |local: &[f32], name: &str| {
+        joint_matrix(model, local, node(model, name))
+            .to_scale_rotation_translation()
+            .1
+    };
+    let (fore, hand) = (node(model, chain[1]) as usize * 10, node(model, chain[2]) as usize * 10);
+    let length = Vec3::from_slice(&local[hand..hand + 3]).normalize_or_zero();
+    let relative = turn_of(local, chain[1]).inverse() * want;
+    let about = length.dot(Vec3::new(relative.x, relative.y, relative.z));
+    let twist = Quat::from_xyzw(length.x * about, length.y * about, length.z * about, relative.w);
+    if twist.length_squared() > 1e-8 {
+        let twist = twist.normalize();
+        let twist = if twist.w < 0.0 { -twist } else { twist };
+        let was = Quat::from_slice(&local[fore + 3..fore + 7]);
+        let turned = (was * Quat::IDENTITY.slerp(twist, 0.5 * share)).normalize();
+        local[fore + 3..fore + 7].copy_from_slice(&turned.to_array());
+    }
+    let was = Quat::from_slice(&local[hand + 3..hand + 7]);
+    let laid = was.slerp(turn_of(local, chain[1]).inverse() * want, share).normalize();
+    local[hand + 3..hand + 7].copy_from_slice(&laid.to_array());
+}
+
 /// Where each hand and foot was put on the last ticks, so that none of them goes
 /// anywhere in one tick.
 ///
@@ -299,21 +366,29 @@ fn weight(model: &Model, local: &[f32], hold: &Hold, target: Vec3) -> f32 {
 /// the holds does not jump: `flow` sees to that.
 #[derive(Default, Clone, Component)]
 pub struct Limbs {
-    /// For each limb of `Limb::ALL`, twenty-three floats. Where its wrist or
+    /// For each limb of `Limb::ALL`, thirty-two floats. Where its wrist or
     /// ankle was put last tick and the tick before, what it is off its place
     /// and how fast that changes, all in the body's frame. Then where its hold
     /// was in the world last tick and the tick before, how much of the hold it
     /// took, how many ticks in a row it has had a hold, to two, and how much of
     /// the hold its elbow or knee has taken, which follows the limb's share
-    /// late: two floats, the second following the first. Last, whether the
-    /// hold was changing too fast to follow on the last tick.
+    /// late: two floats, the second following the first. Then whether the
+    /// hold was changing too fast to follow on the last tick. Last, the way
+    /// the fingers of a hand lay on its last hold, in the world: a hand comes
+    /// off a hold as gently as its elbow does. Last, the way from the limb's
+    /// first joint to its wrist or ankle, and how far off that line and which
+    /// way its elbow or knee was, in the body's frame.
     state: Vec<f32>,
     /// The tick of that, and whether the tick before it is known too.
     tick: u64,
     moving: bool,
 }
 
-const ROW: usize = 23;
+const ROW: usize = 32;
+/// The furthest an elbow or a knee goes round its limb in one tick, metres. A
+/// hold can turn a knee from behind the body to in front of it in a few ticks,
+/// and a knee that goes round that fast is a flick and not a motion.
+const SWING: f32 = 0.045;
 /// A hold that is this much further on in one tick than it was going, metres,
 /// has gone somewhere at once: a hold that goes with the body turns and stops
 /// with it, which is less than this. So has a hold that a limb takes so much
@@ -388,6 +463,13 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
                 (first_share, row[21] + (first_share - row[21]) * follow)
             };
             let (pole, flat) = (middle.lerp(bend, share), share * flat);
+            // A hand lies on its hold as fast as its elbow goes to its side, and
+            // comes off it as gently, the way it lay.
+            if let Some(fingers) = hold.and_then(|i| holds[i].palm) {
+                row[23..26].copy_from_slice(&fingers.to_array());
+            }
+            let fingers = turn.inverse() * Vec3::from_slice(&row[23..26]);
+            let lies = if limb.is_foot() { 0.0 } else { share };
             if !known {
                 (off, drift) = (Vec3::ZERO, Vec3::ZERO);
             } else {
@@ -406,9 +488,10 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
                 let taking = (weight - took).abs() * lever.length();
                 let fast = jumped || taking > if row[22] > 0.0 { TAKEN / 3.0 } else { TAKEN };
                 row[22] = if fast && !firm { 1.0 } else { 0.0 };
-                if firm {
-                    (off, drift) = (Vec3::ZERO, Vec3::ZERO);
-                } else if fast {
+                // A firm hold starts no catching up. What the limb was still off
+                // its place when the hold became firm dies away as before: a hand
+                // that is put on its hold at once goes there in one tick.
+                if fast && !firm {
                     off = was - want;
                     let going = if moving { (was - before) / dt } else { Vec3::ZERO };
                     drift = going.clamp_length_max(FASTEST);
@@ -431,16 +514,48 @@ pub fn apply(w: &mut World, holds: &[Hold]) -> Vec<f32> {
             row[..3].copy_from_slice(&at.to_array());
             row[6..9].copy_from_slice(&off.to_array());
             row[9..12].copy_from_slice(&drift.to_array());
-            if at == tip {
+            if at != tip {
+                let ik = Ik {
+                    chain: chain.map(String::from),
+                    target: at,
+                    pole,
+                    weight: 1.0,
+                };
+                solve_ik(model, &mut local, &ik).expect("the limb's chain is in the rig");
+            }
+            // The elbow or knee goes round the limb no faster than `SWING`. Where
+            // it was is carried along with the limb, so a leg that swings with
+            // its knee in one plane has a knee that has not gone round at all.
+            let [first, middle, tip] = joints(model, &local, limb);
+            let axis = (tip - first).normalize_or_zero();
+            let along = axis * axis.dot(middle - first);
+            let mut out = middle - first - along;
+            let (axis_was, out_was) = (Vec3::from_slice(&row[26..29]), Vec3::from_slice(&row[29..32]));
+            if known && axis != Vec3::ZERO && axis_was != Vec3::ZERO && out.length() > 0.01 && out_was.length() > 0.01 {
+                let carried = Quat::from_rotation_arc(axis_was, axis) * out_was;
+                let carried = (carried - axis * axis.dot(carried)).normalize_or_zero();
+                let now = out / out.length();
+                let across = carried.cross(now);
+                let angle = math::atan2(across.length(), carried.dot(now));
+                let most = SWING / out.length();
+                if carried != Vec3::ZERO && angle > most {
+                    let about = if across.length() > 1e-5 { across.normalize() } else { axis };
+                    out = Quat::from_axis_angle(about, most) * carried * out.length();
+                    let ik = Ik {
+                        chain: chain.map(String::from),
+                        target: tip,
+                        pole: first + along + out.normalize() * 0.5,
+                        weight: 1.0,
+                    };
+                    solve_ik(model, &mut local, &ik).expect("the limb's chain is in the rig");
+                }
+            }
+            row[26..29].copy_from_slice(&axis.to_array());
+            row[29..32].copy_from_slice(&out.to_array());
+            if at == tip && lies == 0.0 {
                 continue;
             }
-            let ik = Ik {
-                chain: chain.map(String::from),
-                target: at,
-                pole,
-                weight: 1.0,
-            };
-            solve_ik(model, &mut local, &ik).expect("the limb's chain is in the rig");
+            lay(model, &mut local, limb, fingers, lies);
             if flat > 0.0 {
                 // A foot that stands is flat, whatever the shin does.
                 let shin = joint_matrix(model, &local, node(model, chain[1]))
@@ -486,15 +601,25 @@ pub fn correct(w: &mut World, holds: &[Hold]) {
                 continue;
             }
             let [first, middle, tip] = joints(model, &local, hold.limb);
-            let bend = (first + target) * 0.5 + hold.bend.unwrap_or(hold.limb.bend());
             let at = tip.lerp(target, weight);
+            // The elbow or knee stays on the side the pose has it, and goes half
+            // the way that the wrist or ankle goes, unless the hold says where it
+            // bends to. A correction is often a few millimetres: a knee that went
+            // to the limb's usual side for that would go there at once.
+            let pole = match hold.bend {
+                Some(bend) => middle.lerp((first + target) * 0.5 + bend, weight),
+                None => middle + (at - tip) * 0.5,
+            };
             let ik = Ik {
                 chain: chain.map(String::from),
                 target: at,
-                pole: middle.lerp(bend, weight),
+                pole,
                 weight: 1.0,
             };
             solve_ik(model, &mut local, &ik).expect("the limb's chain is in the rig");
+            if let Some(fingers) = hold.palm {
+                lay(model, &mut local, hold.limb, turn.inverse() * fingers, weight);
+            }
             if hold.flat > 0.0 {
                 let shin = joint_matrix(model, &local, node(model, chain[1]))
                     .to_scale_rotation_translation()

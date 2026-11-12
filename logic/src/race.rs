@@ -264,6 +264,20 @@ pub fn setup(w: &mut World, id: u8) {
     });
 }
 
+/// Take the route's blocks and its finish out of the world. The `clear` debug
+/// command: the park under a route is then free for a look at one move.
+pub fn clear(w: &mut World) {
+    let Some(selected) = w.try_resource::<RaceState>().map(|race| race.selected) else {
+        return;
+    };
+    let blocks = definition(selected).blocks.iter().map(|block| block.name);
+    for name in blocks.chain(["race-finish"]) {
+        if let Some(entity) = w.named(name) {
+            w.despawn(entity);
+        }
+    }
+}
+
 pub fn tick(w: &mut World) {
     let route = definition(w.resource::<RaceState>().selected);
     let player = w.require::<Transform>("player").position;

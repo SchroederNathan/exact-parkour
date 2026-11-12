@@ -240,7 +240,7 @@ pub fn setup(w: &mut World) {
 /// out of `Input::pointer`.
 pub fn input(w: &mut World, input: &Input) {
     let drag = scene_drag(input);
-    let stick = input.stick_xz("move");
+    let stick = crate::debug::stick_xz(w, input);
     let direction = if stick.length_squared() > 1e-4 {
         stick.normalize()
     } else {
