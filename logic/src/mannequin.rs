@@ -7,6 +7,8 @@ use exact_game::{math, Vec3};
 
 const SIDES: usize = 32;
 const ARMOR: [f32; 4] = [0.19, 0.24, 0.32, 1.0];
+const PLATE: [f32; 4] = [0.28, 0.36, 0.48, 1.0];
+const RUBBER: [f32; 4] = [0.028, 0.038, 0.070, 1.0];
 const JOINT: [f32; 4] = [0.055, 0.075, 0.12, 1.0];
 const EDGE: [f32; 4] = [0.33, 0.40, 0.52, 1.0];
 const CYAN: [f32; 4] = [0.04, 0.72, 0.88, 1.0];
@@ -161,6 +163,33 @@ impl Sculpt<'_> {
         );
     }
 
+    fn panel(
+        &mut self,
+        name: &str,
+        from: Vec3,
+        to: Vec3,
+        front: f32,
+        width: f32,
+        depth: f32,
+        color: [f32; 4],
+    ) {
+        let offset = Vec3::Z * front;
+        self.shell(
+            name,
+            from + offset,
+            to + offset,
+            &[
+                [0.0, 0.0, 0.0],
+                [0.08, width * 0.72, depth * 0.66],
+                [0.22, width, depth],
+                [0.72, width * 0.94, depth],
+                [0.92, width * 0.70, depth * 0.62],
+                [1.0, 0.0, 0.0],
+            ],
+            color,
+        );
+    }
+
     fn finish(mut self) -> MeshData {
         let vertex = |i: u32| Vec3::from_slice(&self.mesh.positions[i as usize * 3..]);
         let mut normals = vec![Vec3::ZERO; self.mesh.positions.len() / 3];
@@ -250,8 +279,56 @@ pub fn skin(model: &mut Model, rig: &Rig) {
         ARMOR,
     );
 
-    // A swept front visor, antenna collar and cheek rails give the silhouette
-    // a readable cyberpunk identity even at the camera's widest distance.
+    sculpt.panel(
+        "head",
+        v(0.0, 1.69, 0.0),
+        v(0.0, 1.76, 0.0),
+        -0.078,
+        0.078,
+        0.018,
+        VISOR,
+    );
+    for (side, x) in [("left", 1.0), ("right", -1.0)] {
+        let _ = side;
+        sculpt.shell(
+            "head",
+            v(0.043 * x, 1.585, -0.035),
+            v(0.043 * x, 1.705, -0.035),
+            &[
+                [0.0, 0.0, 0.0],
+                [0.12, 0.035, 0.042],
+                [0.42, 0.043, 0.050],
+                [0.78, 0.038, 0.044],
+                [1.0, 0.0, 0.0],
+            ],
+            PLATE,
+        );
+    }
+    for x in [-0.028, 0.028] {
+        sculpt.shell(
+            "neck",
+            v(x, 1.505, -0.055),
+            v(x, 1.575, -0.055),
+            &[
+                [0.0, 0.0, 0.0],
+                [0.16, 0.020, 0.022],
+                [0.45, 0.026, 0.026],
+                [0.84, 0.021, 0.022],
+                [1.0, 0.0, 0.0],
+            ],
+            RUBBER,
+        );
+    }
+    sculpt.panel(
+        "neck",
+        v(0.0, 1.50, 0.0),
+        v(0.0, 1.58, 0.0),
+        -0.088,
+        0.060,
+        0.016,
+        CYAN,
+    );
+
     sculpt.shell(
         "head",
         v(0.0, 1.66, -0.078),
@@ -270,6 +347,54 @@ pub fn skin(model: &mut Model, rig: &Rig) {
     sculpt.band("spine", 0.15, 0.38, 0.172, 0.112, CYAN);
     sculpt.band("spine", 0.62, 0.84, 0.166, 0.108, MAGENTA);
 
+    sculpt.panel(
+        "spine",
+        v(0.0, 1.17, 0.0),
+        v(0.0, 1.45, 0.0),
+        -0.092,
+        0.155,
+        0.030,
+        PLATE,
+    );
+    sculpt.panel(
+        "spine",
+        v(0.0, 1.23, 0.0),
+        v(0.0, 1.40, 0.0),
+        -0.126,
+        0.052,
+        0.016,
+        VISOR,
+    );
+    sculpt.panel(
+        "spine",
+        v(0.0, 1.41, 0.0),
+        v(0.0, 1.49, 0.0),
+        -0.100,
+        0.165,
+        0.022,
+        EDGE,
+    );
+
+    sculpt.band("hips", 0.05, 0.28, 0.158, 0.112, RUBBER);
+    for (x, z, width, depth, color) in [
+        (0.145, -0.055, 0.048, 0.040, MAGENTA),
+        (-0.145, -0.042, 0.058, 0.046, PLATE),
+    ] {
+        sculpt.shell(
+            "hips",
+            v(x, 0.985, z),
+            v(x, 1.105, z),
+            &[
+                [0.0, 0.0, 0.0],
+                [0.12, width * 0.74, depth * 0.72],
+                [0.35, width, depth],
+                [0.78, width * 0.92, depth * 0.92],
+                [1.0, 0.0, 0.0],
+            ],
+            color,
+        );
+    }
+
     for (side, sign) in [("l", 1.0), ("r", -1.0)] {
         let n = |part: &str| format!("{part}_{side}");
         sculpt.limb(&n("thigh"), 0.072, 0.077, 0.62, 0.049);
@@ -283,9 +408,33 @@ pub fn skin(model: &mut Model, rig: &Rig) {
         sculpt.band(&n("upper_arm"), 0.03, 0.22, 0.066, 0.070, MAGENTA);
         sculpt.band(&n("forearm"), 0.42, 0.78, 0.052, 0.052, CYAN);
         sculpt.band(&n("hand"), 0.0, 0.82, 0.040, 0.027, GLOVE);
+        sculpt.band(&n("upper_arm"), 0.0, 0.28, 0.076, 0.080, PLATE);
+        let forearm = &rig.bones()[sculpt.joint(&n("forearm"))];
+        let forearm_head = forearm.head / sculpt.scale;
+        let forearm_tail = forearm.tail / sculpt.scale;
+        sculpt.panel(
+            &n("forearm"),
+            forearm_head,
+            forearm_tail,
+            -0.042,
+            0.046,
+            0.018,
+            EDGE,
+        );
+        let shin = &rig.bones()[sculpt.joint(&n("shin"))];
+        let shin_head = shin.head / sculpt.scale;
+        let shin_tail = shin.tail / sculpt.scale;
+        sculpt.panel(
+            &n("shin"),
+            shin_head.lerp(shin_tail, 0.18),
+            shin_head.lerp(shin_tail, 0.52),
+            -0.056,
+            0.064,
+            0.022,
+            PLATE,
+        );
         let foot = n("foot");
         sculpt.ball(&foot, v(0.09 * sign, 0.098, -0.015), v(0.033, 0.037, 0.033));
-        // A low, broad toe and raised instep, with the sole at ground level.
         sculpt.shell(
             &foot,
             v(0.09 * sign, 0.051, -0.079),
@@ -303,6 +452,32 @@ pub fn skin(model: &mut Model, rig: &Rig) {
                 [1.0, 0.0, 0.0],
             ],
             BOOT,
+        );
+        sculpt.shell(
+            &foot,
+            v(0.09 * sign, 0.052, -0.10),
+            v(0.09 * sign, 0.052, 0.19),
+            &[
+                [0.0, 0.0, 0.0],
+                [0.08, 0.046, 0.014],
+                [0.35, 0.060, 0.020],
+                [0.80, 0.058, 0.018],
+                [0.96, 0.042, 0.014],
+                [1.0, 0.0, 0.0],
+            ],
+            RUBBER,
+        );
+        sculpt.shell(
+            &foot,
+            v(0.09 * sign, 0.082, -0.105),
+            v(0.09 * sign, 0.082, -0.015),
+            &[
+                [0.0, 0.0, 0.0],
+                [0.18, 0.053, 0.030],
+                [0.72, 0.058, 0.033],
+                [1.0, 0.0, 0.0],
+            ],
+            EDGE,
         );
     }
     let mesh = sculpt.finish();

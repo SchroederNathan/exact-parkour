@@ -63,6 +63,68 @@ struct CityTower {
     accent: [f32; 3],
 }
 
+#[derive(Clone, Copy)]
+enum RooftopProp {
+    AirHandler,
+    CrateStack,
+    BarrelCluster,
+    PipeRack,
+    CableSpool,
+    Debris,
+}
+
+#[derive(Clone, Copy)]
+struct PropPlacement {
+    name: &'static str,
+    at: [f32; 3],
+    yaw: f32,
+    accent: [f32; 3],
+    kind: RooftopProp,
+}
+
+const ROOFTOP_PROPS: &[PropPlacement] = &[
+    PropPlacement {
+        name: "prop-crates-gate",
+        at: [-4.1, 0.42, -1.2],
+        yaw: 0.12,
+        accent: NEON_AMBER,
+        kind: RooftopProp::CrateStack,
+    },
+    PropPlacement {
+        name: "prop-pipes-gate",
+        at: [4.3, 0.25, -1.8],
+        yaw: 1.57,
+        accent: NEON_CYAN,
+        kind: RooftopProp::PipeRack,
+    },
+    PropPlacement {
+        name: "prop-barrels-gate",
+        at: [-5.2, 0.44, 2.1],
+        yaw: -0.18,
+        accent: NEON_PINK,
+        kind: RooftopProp::BarrelCluster,
+    },
+    PropPlacement {
+        name: "prop-air-handler-gate",
+        at: [5.6, 0.72, 2.4],
+        yaw: -0.28,
+        accent: NEON_VIOLET,
+        kind: RooftopProp::AirHandler,
+    },
+    PropPlacement { name: "prop-air-handler-east", at: [10.5, 0.72, 5.3], yaw: 0.18, accent: NEON_CYAN, kind: RooftopProp::AirHandler },
+    PropPlacement { name: "prop-air-handler-west", at: [-10.5, 0.72, 3.2], yaw: -0.24, accent: NEON_PINK, kind: RooftopProp::AirHandler },
+    PropPlacement { name: "prop-crates-north", at: [11.5, 0.45, -2.6], yaw: -0.12, accent: NEON_AMBER, kind: RooftopProp::CrateStack },
+    PropPlacement { name: "prop-crates-south", at: [-10.5, 0.45, 10.8], yaw: 0.32, accent: NEON_VIOLET, kind: RooftopProp::CrateStack },
+    PropPlacement { name: "prop-barrels-west", at: [-22.0, 0.42, 5.4], yaw: 0.0, accent: NEON_PINK, kind: RooftopProp::BarrelCluster },
+    PropPlacement { name: "prop-barrels-east", at: [21.0, 0.42, -3.8], yaw: 0.0, accent: NEON_CYAN, kind: RooftopProp::BarrelCluster },
+    PropPlacement { name: "prop-pipes-north", at: [-5.5, 0.28, -2.0], yaw: 0.0, accent: NEON_AMBER, kind: RooftopProp::PipeRack },
+    PropPlacement { name: "prop-pipes-south", at: [4.0, 0.28, 11.5], yaw: 1.57, accent: NEON_VIOLET, kind: RooftopProp::PipeRack },
+    PropPlacement { name: "prop-spool-east", at: [19.0, 0.48, 9.5], yaw: 0.25, accent: NEON_CYAN, kind: RooftopProp::CableSpool },
+    PropPlacement { name: "prop-spool-west", at: [-19.5, 0.48, -3.0], yaw: -0.2, accent: NEON_PINK, kind: RooftopProp::CableSpool },
+    PropPlacement { name: "prop-debris-north", at: [8.3, 0.14, -17.0], yaw: 0.4, accent: NEON_CYAN, kind: RooftopProp::Debris },
+    PropPlacement { name: "prop-debris-south", at: [-7.0, 0.14, 16.5], yaw: -0.35, accent: NEON_AMBER, kind: RooftopProp::Debris },
+];
+
 const SKYLINE: &[CityTower] = &[
     CityTower {
         name: "tower-neon-east",
@@ -191,12 +253,14 @@ fn accent_material(accent: [f32; 3]) -> Material {
 fn spawn_city_tower(w: &mut World, tower: &CityTower) {
     let [x, y, z] = tower.at;
     let [width, height, depth] = tower.size;
+    let mut tower_material = Material::hex(CITY_BODY).metallic(0.82).rough(0.24);
+    tower_material.grid_spacing = 1.6;
     w.spawn_named(
         tower.name,
         (
             Transform::at(x, y, z),
             Mesh::cuboid(Vec3::new(width, height, depth)),
-            Material::hex(CITY_BODY).metallic(0.82).rough(0.24),
+            tower_material,
         ),
     );
     w.spawn_named(
@@ -285,6 +349,214 @@ fn spawn_rooftop_detail(
             material,
         ),
     );
+}
+
+fn local_offset(origin: Vec3, yaw: f32, offset: Vec3) -> Vec3 {
+    origin + Quat::from_rotation_y(yaw) * offset
+}
+
+fn prop_transform(origin: Vec3, yaw: f32, offset: Vec3, rotation: Quat) -> Transform {
+    Transform {
+        position: local_offset(origin, yaw, offset),
+        rotation: Quat::from_rotation_y(yaw) * rotation,
+        ..Transform::default()
+    }
+}
+
+fn prop_piece(
+    w: &mut World,
+    name: String,
+    origin: Vec3,
+    yaw: f32,
+    offset: Vec3,
+    mesh: Mesh,
+    material: Material,
+) {
+    w.spawn_named(name.as_str(), (prop_transform(origin, yaw, offset, Quat::IDENTITY), mesh, material));
+}
+
+fn prop_piece_rotated(
+    w: &mut World,
+    name: String,
+    origin: Vec3,
+    yaw: f32,
+    offset: Vec3,
+    rotation: Quat,
+    mesh: Mesh,
+    material: Material,
+) {
+    w.spawn_named(name.as_str(), (prop_transform(origin, yaw, offset, rotation), mesh, material));
+}
+
+fn spawn_rooftop_prop(w: &mut World, placement: &PropPlacement) {
+    let origin = Vec3::from_array(placement.at);
+    let yaw = placement.yaw;
+    let accent = placement.accent;
+    let steel = Material::hex(CITY_EDGE).metallic(0.88).rough(0.24);
+    let dark = Material::hex(CITY_BODY).metallic(0.72).rough(0.36);
+    let rubber = Material::hex("#141823").metallic(0.15).rough(0.72);
+    match placement.kind {
+        RooftopProp::AirHandler => {
+            prop_piece(w, format!("{}-base", placement.name), origin, yaw, Vec3::new(0.0, 0.5, 0.0), Mesh::cuboid(Vec3::new(2.6, 1.0, 1.8)), dark.clone());
+            prop_piece(w, format!("{}-top", placement.name), origin, yaw, Vec3::new(0.0, 1.08, 0.0), Mesh::cuboid(Vec3::new(2.25, 0.12, 1.48)), steel.clone());
+            for (index, x) in [-0.78, 0.0, 0.78].into_iter().enumerate() {
+                prop_piece_rotated(w, format!("{}-fan-{index}", placement.name), origin, yaw, Vec3::new(x, 1.2, -0.01), Quat::from_rotation_x(std::f32::consts::FRAC_PI_2), Mesh::cylinder(0.33, 0.1), steel.clone());
+                prop_piece(w, format!("{}-fan-ring-{index}", placement.name), origin, yaw, Vec3::new(x, 1.27, -0.01), Mesh::torus(0.27, 0.035), accent_material(accent));
+                for fin in [-0.18, 0.0, 0.18] {
+                    prop_piece(w, format!("{}-fin-{index}-{fin}", placement.name), origin, yaw, Vec3::new(x + fin, 0.98, 0.77), Mesh::cuboid(Vec3::new(0.055, 0.64, 0.06)), steel.clone());
+                }
+            }
+            prop_piece_rotated(w, format!("{}-duct", placement.name), origin, yaw, Vec3::new(-1.4, 0.82, 0.35), Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), Mesh::cylinder(0.15, 1.6), steel.clone());
+            prop_piece(w, format!("{}-warning", placement.name), origin, yaw, Vec3::new(0.0, 0.63, -0.93), Mesh::cuboid(Vec3::new(1.0, 0.16, 0.035)), accent_material(NEON_AMBER));
+        }
+        RooftopProp::CrateStack => {
+            for (index, offset) in [Vec3::new(-0.58, 0.34, 0.0), Vec3::new(0.54, 0.34, 0.1), Vec3::new(-0.04, 1.0, -0.05)].into_iter().enumerate() {
+                prop_piece_rotated(w, format!("{}-crate-{index}", placement.name), origin, yaw, offset, Quat::from_rotation_y((index as f32 - 1.0) * 0.11), Mesh::cuboid(Vec3::new(1.0, 0.68, 0.86)), Material::hex("#3a4658").metallic(0.62).rough(0.4));
+                prop_piece(w, format!("{}-crate-band-{index}", placement.name), origin, yaw, offset + Vec3::new(0.0, 0.02, -0.44), Mesh::cuboid(Vec3::new(0.8, 0.15, 0.035)), accent_material(accent));
+                for bolt_x in [-0.36, 0.36] {
+                    prop_piece(w, format!("{}-bolt-{index}-{bolt_x}", placement.name), origin, yaw, offset + Vec3::new(bolt_x, 0.1, -0.47), Mesh::sphere(0.045), steel.clone());
+                }
+            }
+        }
+        RooftopProp::BarrelCluster => {
+            for (index, offset) in [Vec3::new(-0.58, 0.48, 0.0), Vec3::new(0.55, 0.48, 0.08), Vec3::new(0.0, 0.48, 0.78)].into_iter().enumerate() {
+                prop_piece(w, format!("{}-drum-{index}", placement.name), origin, yaw, offset, Mesh::cylinder(0.43, 0.94), Material::hex("#36475a").metallic(0.75).rough(0.32));
+                for band_y in [0.22, 0.72] {
+                    prop_piece(w, format!("{}-band-{index}-{band_y}", placement.name), origin, yaw, offset + Vec3::new(0.0, band_y - 0.47, 0.0), Mesh::torus(0.44, 0.035), steel.clone());
+                }
+                prop_piece(w, format!("{}-lid-{index}", placement.name), origin, yaw, offset + Vec3::new(0.0, 0.49, 0.0), Mesh::ring(0.1, 0.34), accent_material(accent));
+            }
+            prop_piece(w, format!("{}-spill", placement.name), origin, yaw, Vec3::new(0.06, 0.035, 0.12), Mesh::ring(0.2, 0.62), Material::glow([accent[0] * 0.28, accent[1] * 0.28, accent[2] * 0.28]).alpha(0.55));
+        }
+        RooftopProp::PipeRack => {
+            for (index, _x) in [-0.72, 0.0, 0.72].into_iter().enumerate() {
+                prop_piece_rotated(w, format!("{}-pipe-{index}", placement.name), origin, yaw, Vec3::new(0.0, 0.46 + index as f32 * 0.22, 0.0), Quat::from_rotation_x(std::f32::consts::FRAC_PI_2), Mesh::cylinder(0.12, 2.4), steel.clone());
+                prop_piece(w, format!("{}-pipe-cap-{index}", placement.name), origin, yaw, Vec3::new(-1.2, 0.46 + index as f32 * 0.22, 0.0), Mesh::torus(0.13, 0.03), accent_material(accent));
+                prop_piece(w, format!("{}-pipe-tag-{index}", placement.name), origin, yaw, Vec3::new(0.22, 0.46 + index as f32 * 0.22, -0.14), Mesh::cuboid(Vec3::new(0.32, 0.12, 0.035)), accent_material(if index == 1 { NEON_AMBER } else { accent }));
+                for side in [-1.0, 1.0] {
+                    prop_piece(w, format!("{}-post-{index}-{side}", placement.name), origin, yaw, Vec3::new(side * 0.98, 0.34, 0.0), Mesh::cuboid(Vec3::new(0.1, 0.68, 0.1)), steel.clone());
+                }
+            }
+        }
+        RooftopProp::CableSpool => {
+            prop_piece_rotated(w, format!("{}-drum", placement.name), origin, yaw, Vec3::new(0.0, 0.58, 0.0), Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), Mesh::cylinder(0.53, 0.72), rubber.clone());
+            for side in [-0.39, 0.39] {
+                prop_piece_rotated(w, format!("{}-flange-{side}", placement.name), origin, yaw, Vec3::new(side, 0.58, 0.0), Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), Mesh::cylinder(0.74, 0.1), steel.clone());
+                prop_piece_rotated(w, format!("{}-rim-{side}", placement.name), origin, yaw, Vec3::new(side, 0.58, 0.0), Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), Mesh::torus(0.66, 0.055), accent_material(accent));
+            }
+            for (index, offset) in [Vec3::new(0.0, 0.03, -0.82), Vec3::new(0.65, 0.035, -0.58), Vec3::new(-0.74, 0.035, -0.34)].into_iter().enumerate() {
+                prop_piece(w, format!("{}-loose-cable-{index}", placement.name), origin, yaw, offset, Mesh::torus(0.35 + index as f32 * 0.06, 0.028), accent_material(accent));
+            }
+        }
+        RooftopProp::Debris => {
+            for (index, (offset, size)) in [
+                (Vec3::new(-0.72, 0.11, 0.0), Vec3::new(0.9, 0.22, 0.45)),
+                (Vec3::new(0.0, 0.17, 0.38), Vec3::new(0.52, 0.34, 0.62)),
+                (Vec3::new(0.68, 0.08, -0.28), Vec3::new(0.72, 0.16, 0.32)),
+                (Vec3::new(0.26, 0.08, -0.72), Vec3::new(0.3, 0.16, 0.86)),
+            ].into_iter().enumerate() {
+                prop_piece_rotated(w, format!("{}-scrap-{index}", placement.name), origin, yaw, offset, Quat::from_rotation_y(index as f32 * 0.7) * Quat::from_rotation_x(0.15 * index as f32), Mesh::cuboid(size), Material::hex(if index % 2 == 0 { "#38404d" } else { "#5a3b45" }).metallic(0.68).rough(0.48));
+            }
+            prop_piece(w, format!("{}-wet-patch", placement.name), origin, yaw, Vec3::new(0.0, 0.025, 0.0), Mesh::ring(0.18, 0.95), Material::glow([accent[0] * 0.16, accent[1] * 0.16, accent[2] * 0.16]).alpha(0.42));
+        }
+    }
+}
+
+const ROOFTOP_SURFACES: &[(&str, [f32; 3], [f32; 2], [f32; 3])] = &[
+    ("service-yard-north", [-2.0, 0.035, -1.5], [11.0, 4.5], NEON_CYAN),
+    ("service-yard-south", [3.0, 0.035, 10.0], [10.0, 4.0], NEON_VIOLET),
+    ("service-yard-west", [-18.0, 0.035, 2.0], [7.0, 8.0], NEON_PINK),
+];
+
+fn spawn_rooftop_surfaces(w: &mut World) {
+    for (name, at, size, accent) in ROOFTOP_SURFACES {
+        let [x, y, z] = *at;
+        let [width, depth] = *size;
+        let mut deck_material = Material::hex("#1b2230").metallic(0.58).rough(0.5);
+        deck_material.grid_spacing = 0.9;
+        w.spawn_named(
+            *name,
+            (
+                Transform::at(x, y, z),
+                Mesh::cuboid(Vec3::new(width, 0.06, depth)),
+                deck_material,
+            ),
+        );
+        for (index, seam) in [-0.42, 0.0, 0.42].into_iter().enumerate() {
+            w.spawn_named(
+                format!("{name}-seam-x-{index}"),
+                (
+                    Transform::at(x + seam * width, y + 0.045, z),
+                    Mesh::cuboid(Vec3::new(0.035, 0.018, depth * 0.92)),
+                    Material::hex(CITY_EDGE).metallic(0.8).rough(0.24),
+                ),
+            );
+        }
+        for (index, seam) in [-0.36, 0.0, 0.36].into_iter().enumerate() {
+            w.spawn_named(
+                format!("{name}-seam-z-{index}"),
+                (
+                    Transform::at(x, y + 0.047, z + seam * depth),
+                    Mesh::cuboid(Vec3::new(width * 0.92, 0.018, 0.035)),
+                    Material::hex(CITY_EDGE).metallic(0.8).rough(0.24),
+                ),
+            );
+        }
+        for (index, ox) in [-0.32, 0.32].into_iter().enumerate() {
+            w.spawn_named(
+                format!("{name}-drain-{index}"),
+                (
+                    Transform::at(x + ox * width, y + 0.06, z + depth * 0.25),
+                    Mesh::ring(0.17, 0.34),
+                    Material::hex("#0b0e16").metallic(0.9).rough(0.2),
+                ),
+            );
+            for rib in [-0.1, 0.0, 0.1] {
+                w.spawn_named(
+                    format!("{name}-drain-rib-{index}-{rib}"),
+                    (
+                        Transform::at(x + ox * width + rib, y + 0.066, z + depth * 0.25),
+                        Mesh::cuboid(Vec3::new(0.025, 0.012, 0.48)),
+                        Material::hex(CITY_EDGE).metallic(0.85).rough(0.24),
+                    ),
+                );
+            }
+        }
+        w.spawn_named(
+            format!("{name}-puddle"),
+            (
+                Transform::at(x + width * 0.18, y + 0.061, z - depth * 0.18),
+                Mesh::ring(0.24, 1.15),
+                Material::glow([accent[0] * 0.11, accent[1] * 0.11, accent[2] * 0.11]).alpha(0.5),
+            ),
+        );
+    }
+}
+
+fn spawn_obstacle_dressing(w: &mut World) {
+    for block in BLOCKS.iter().filter(|b| b.name.starts_with("vault") || b.name.starts_with("ledge")) {
+        let yaw = block.yaw.to_radians();
+        let front = local_offset(Vec3::from_array(block.at), yaw, Vec3::new(0.0, 0.0, -block.size[2] * 0.5 - 0.045));
+        let tone = if block.name.starts_with("vault") { NEON_PINK } else { NEON_CYAN };
+        w.spawn_named(
+            format!("{}-access-panel", block.name),
+            (
+                Transform { position: front + Vec3::Y * (block.size[1] * 0.24), rotation: Quat::from_rotation_y(yaw), ..Transform::default() },
+                Mesh::cuboid(Vec3::new(block.size[0] * 0.32, 0.22, 0.035)),
+                Material::hex("#3a4350").metallic(0.82).rough(0.28),
+            ),
+        );
+        for bolt in [-0.12, 0.12] {
+            w.spawn_named(
+                format!("{}-access-bolt-{bolt}", block.name),
+                (
+                    Transform { position: front + Vec3::Y * (block.size[1] * 0.24) + Quat::from_rotation_y(yaw) * Vec3::new(bolt, 0.0, -0.028), rotation: Quat::from_rotation_y(yaw), ..Transform::default() },
+                    Mesh::sphere(0.035),
+                    Material::glow(tone),
+                ),
+            );
+        }
+    }
 }
 
 fn spawn_city_decorations(w: &mut World) {
@@ -501,6 +773,11 @@ pub fn setup(w: &mut World) {
             );
         }
     }
+    for placement in ROOFTOP_PROPS {
+        spawn_rooftop_prop(w, placement);
+    }
+    spawn_rooftop_surfaces(w);
+    spawn_obstacle_dressing(w);
     spawn_city_decorations(w);
     w.insert_resource(Ramp::default());
 }

@@ -226,6 +226,198 @@ pub fn start_position(id: u8) -> Vec3 {
     Vec3::from_array(route.start)
 }
 
+fn route_offset(at: Vec3, yaw: f32, offset: Vec3) -> Vec3 {
+    at + Quat::from_rotation_y(yaw) * offset
+}
+
+fn route_piece(
+    w: &mut World,
+    name: String,
+    at: Vec3,
+    yaw: f32,
+    offset: Vec3,
+    rotation: Quat,
+    mesh: Mesh,
+    material: Material,
+) {
+    w.spawn_named(
+        name.as_str(),
+        (
+            Transform {
+                position: route_offset(at, yaw, offset),
+                rotation: Quat::from_rotation_y(yaw) * rotation,
+                ..Transform::default()
+            },
+            mesh,
+            material,
+        ),
+    );
+}
+
+fn spawn_route_dressing(w: &mut World, route: &RaceDefinition, signal: [f32; 3]) {
+    for (index, block) in route.blocks.iter().enumerate() {
+        let at = Vec3::from_array(block.at);
+        let yaw = block.yaw.to_radians();
+        let depth = block.size[2] * 0.5 + 0.05;
+        let front = Vec3::new(0.0, block.size[1] * 0.2, -depth);
+        route_piece(
+            w,
+            format!("{}-service-face", block.name),
+            at,
+            yaw,
+            front,
+            Quat::IDENTITY,
+            Mesh::cuboid(Vec3::new((block.size[0] * 0.42).max(0.32), 0.28, 0.045)),
+            Material::hex("#303a49").metallic(0.84).rough(0.28),
+        );
+        route_piece(
+            w,
+            format!("{}-service-strip", block.name),
+            at,
+            yaw,
+            front + Vec3::new(0.0, 0.2, -0.035),
+            Quat::IDENTITY,
+            Mesh::cuboid(Vec3::new((block.size[0] * 0.34).max(0.24), 0.045, 0.018)),
+            Material::glow(signal),
+        );
+        for (bolt, side) in [-1.0, 1.0].into_iter().enumerate() {
+            route_piece(
+                w,
+                format!("{}-service-bolt-{bolt}", block.name),
+                at,
+                yaw,
+                front + Vec3::new(side * (block.size[0] * 0.17).min(0.32), 0.0, -0.04),
+                Quat::IDENTITY,
+                Mesh::sphere(0.04),
+                Material::hex("#b2beca").metallic(0.94).rough(0.18),
+            );
+        }
+        if block.size[1] > 1.6 {
+            for (rail, side) in [-1.0, 1.0].into_iter().enumerate() {
+                route_piece(
+                    w,
+                    format!("{}-ladder-rail-{rail}", block.name),
+                    at,
+                    yaw,
+                    Vec3::new(side * (block.size[0] * 0.32).min(0.65), block.size[1] * 0.5, -depth - 0.08),
+                    Quat::IDENTITY,
+                    Mesh::cuboid(Vec3::new(0.055, block.size[1] * 0.84, 0.055)),
+                    Material::hex("#6c7785").metallic(0.86).rough(0.3),
+                );
+            }
+            for rung in 0..4 {
+                let y = -block.size[1] * 0.25 + rung as f32 * block.size[1] * 0.17;
+                route_piece(
+                    w,
+                    format!("{}-ladder-rung-{rung}", block.name),
+                    at,
+                    yaw,
+                    Vec3::new(0.0, y, -depth - 0.08),
+                    Quat::IDENTITY,
+                    Mesh::cuboid(Vec3::new((block.size[0] * 0.34).min(1.0), 0.045, 0.045)),
+                    Material::hex("#6c7785").metallic(0.86).rough(0.3),
+                );
+            }
+        }
+        if index % 2 == 0 {
+            route_piece(
+                w,
+                format!("{}-hazard-chevron", block.name),
+                at,
+                yaw,
+                Vec3::new(block.size[0] * 0.28, 0.04, -block.size[2] * 0.52),
+                Quat::from_rotation_z(0.2),
+                Mesh::cuboid(Vec3::new(0.32, 0.12, 0.035)),
+                Material::glow([5.5, 1.7, 0.08]),
+            );
+        }
+    }
+
+    let equipment: &[(Vec3, f32, f32, bool)] = match route.id {
+        0 => &[
+            (Vec3::new(-3.8, 0.22, -3.8), 0.0, 1.1, false),
+            (Vec3::new(4.2, 0.28, -13.2), 0.4, 0.9, true),
+            (Vec3::new(-3.6, 3.86, -20.7), -0.2, 0.85, false),
+        ],
+        1 => &[
+            (Vec3::new(3.6, 0.22, -5.1), 0.2, 1.0, true),
+            (Vec3::new(-7.6, 2.8, -15.0), -0.5, 0.8, false),
+            (Vec3::new(-12.0, 5.0, -7.4), 0.0, 1.15, true),
+        ],
+        _ => &[
+            (Vec3::new(2.2, 0.26, -3.0), -0.2, 1.0, false),
+            (Vec3::new(5.7, 2.05, -10.0), 0.3, 0.9, true),
+            (Vec3::new(-3.2, 3.95, -17.7), -0.2, 1.1, false),
+        ],
+    };
+    for (index, (position, yaw, scale, lit)) in equipment.iter().enumerate() {
+        let at = *position;
+        let tone = if *lit { signal } else { [0.2, 0.35, 0.5] };
+        route_piece(
+            w,
+            format!("route-equipment-{index}-body"),
+            at,
+            *yaw,
+            Vec3::new(0.0, 0.38 * *scale, 0.0),
+            Quat::IDENTITY,
+            Mesh::cuboid(Vec3::new(1.2 * *scale, 0.76 * *scale, 0.86 * *scale)),
+            Material::hex("#202a39").metallic(0.8).rough(0.34),
+        );
+        for fan in [-0.32, 0.32] {
+            route_piece(
+                w,
+                format!("route-equipment-{index}-fan-{fan}"),
+                at,
+                *yaw,
+                Vec3::new(fan * *scale, 0.82 * *scale, -0.02),
+                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                Mesh::cylinder(0.18 * *scale, 0.07),
+                Material::hex("#697685").metallic(0.82).rough(0.25),
+            );
+            route_piece(
+                w,
+                format!("route-equipment-{index}-halo-{fan}"),
+                at,
+                *yaw,
+                Vec3::new(fan * *scale, 0.87 * *scale, -0.02),
+                Quat::IDENTITY,
+                Mesh::torus(0.15 * *scale, 0.025),
+                Material::glow(tone),
+            );
+        }
+    }
+
+    let debris = match route.id {
+        0 => [Vec3::new(7.0, 0.08, -17.0), Vec3::new(-7.5, 4.0, -24.0)],
+        1 => [Vec3::new(-2.5, 0.08, -14.0), Vec3::new(-16.0, 5.0, -7.0)],
+        _ => [Vec3::new(7.7, 0.08, -14.0), Vec3::new(-10.5, 3.0, -25.0)],
+    };
+    for (index, at) in debris.into_iter().enumerate() {
+        for (piece, offset) in [Vec3::new(-0.3, 0.08, 0.0), Vec3::new(0.28, 0.12, 0.18), Vec3::new(0.0, 0.07, -0.28)].into_iter().enumerate() {
+            route_piece(
+                w,
+                format!("route-debris-{index}-{piece}"),
+                at,
+                index as f32 * 0.4,
+                offset,
+                Quat::from_rotation_y((piece as f32) * 0.7) * Quat::from_rotation_x(0.12 * piece as f32),
+                Mesh::cuboid(Vec3::new(0.42 + piece as f32 * 0.12, 0.14 + piece as f32 * 0.06, 0.28 + piece as f32 * 0.11)),
+                Material::hex(if piece == 1 { "#59404c" } else { "#3b4652" }).metallic(0.62).rough(0.48),
+            );
+        }
+        route_piece(
+            w,
+            format!("route-debris-{index}-wet"),
+            at,
+            0.0,
+            Vec3::new(0.0, 0.025, 0.0),
+            Quat::IDENTITY,
+            Mesh::ring(0.16, 0.7),
+            Material::glow([signal[0] * 0.13, signal[1] * 0.13, signal[2] * 0.13]).alpha(0.42),
+        );
+    }
+}
+
 pub fn setup(w: &mut World, id: u8) {
     let route = definition(id);
     let signal = match route.id {
@@ -252,8 +444,6 @@ pub fn setup(w: &mut World, id: u8) {
                 Material::hex(block.color),
             ),
         );
-        // A readable signal edge turns every route block into part of the
-        // same nighttime wayfinding language as the skyline towers.
         w.spawn_named(
             format!("{}-signal", block.name),
             (
@@ -271,6 +461,7 @@ pub fn setup(w: &mut World, id: u8) {
             ),
         );
     }
+    spawn_route_dressing(w, route, signal);
     let finish = Vec3::from_array(route.finish);
     w.spawn_named(
         "race-finish",

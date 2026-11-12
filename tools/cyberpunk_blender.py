@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import sys
 from pathlib import Path
 
 import bpy  # type: ignore
@@ -203,7 +204,12 @@ def build(output: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=ROOT / "art" / "cyberpunk_city.glb")
-    args = parser.parse_args()
+    # Blender keeps its own flags in ``sys.argv`` on some macOS builds even
+    # when the conventional ``--`` separator is present. Parse only the
+    # arguments after that separator so the same script works headlessly on
+    # Blender 3.6 through 5.x.
+    blender_args = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    args = parser.parse_args(blender_args)
     build(args.output.resolve())
     print(f"wrote {args.output.resolve()}")
 
