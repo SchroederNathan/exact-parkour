@@ -29,49 +29,49 @@ const SKYLINE_BLOCKS: &[RaceBlock] = &[
         name: "skyline-step-1",
         at: [-1.5, 0.35, -5.0],
         size: [2.4, 0.7, 2.0],
-        color: "#2d8192",
+        color: "#164f63",
         yaw: 0.0,
     },
     RaceBlock {
         name: "skyline-step-2",
         at: [2.0, 1.1, -8.0],
         size: [2.4, 1.8, 2.0],
-        color: "#2d8192",
+        color: "#164f63",
         yaw: 0.0,
     },
     RaceBlock {
         name: "skyline-rail",
         at: [5.5, 1.35, -11.5],
         size: [5.0, 0.35, 0.45],
-        color: "#e1a44b",
+        color: "#6d3b20",
         yaw: 0.0,
     },
     RaceBlock {
         name: "skyline-tower",
         at: [5.5, 2.7, -15.5],
         size: [3.2, 5.4, 3.2],
-        color: "#536d9a",
+        color: "#233d64",
         yaw: 0.0,
     },
     RaceBlock {
         name: "skyline-bridge",
         at: [1.5, 3.6, -20.5],
         size: [9.0, 0.45, 2.2],
-        color: "#e1a44b",
+        color: "#6d3b20",
         yaw: 0.0,
     },
     RaceBlock {
         name: "skyline-slide",
         at: [-5.0, 3.0, -22.5],
         size: [2.4, 1.1, 0.7],
-        color: "#d56b4c",
+        color: "#5c274e",
         yaw: 0.0,
     },
     RaceBlock {
         name: "skyline-ledge",
         at: [-9.5, 4.4, -25.0],
         size: [3.4, 3.0, 2.6],
-        color: "#536d9a",
+        color: "#233d64",
         yaw: 0.0,
     },
 ];
@@ -81,49 +81,49 @@ const SWITCHBACK_BLOCKS: &[RaceBlock] = &[
         name: "switchback-low",
         at: [0.0, 0.3, -5.5],
         size: [7.0, 0.6, 1.1],
-        color: "#af6d3d",
+        color: "#563047",
         yaw: 0.0,
     },
     RaceBlock {
         name: "switchback-turn",
         at: [5.0, 1.0, -9.0],
         size: [2.0, 2.0, 5.0],
-        color: "#438d86",
+        color: "#174c5c",
         yaw: 0.0,
     },
     RaceBlock {
         name: "switchback-high",
         at: [0.5, 2.0, -12.5],
         size: [7.0, 2.0, 1.1],
-        color: "#438d86",
+        color: "#174c5c",
         yaw: 0.0,
     },
     RaceBlock {
         name: "switchback-gap",
         at: [-5.0, 2.6, -16.5],
         size: [2.8, 1.2, 2.8],
-        color: "#755fa1",
+        color: "#35275e",
         yaw: 0.0,
     },
     RaceBlock {
         name: "switchback-gap-2",
         at: [-10.5, 3.4, -16.5],
         size: [2.8, 2.8, 2.8],
-        color: "#755fa1",
+        color: "#35275e",
         yaw: 0.0,
     },
     RaceBlock {
         name: "switchback-wall",
         at: [-14.5, 4.4, -12.0],
         size: [1.0, 4.0, 7.0],
-        color: "#af6d3d",
+        color: "#563047",
         yaw: 0.0,
     },
     RaceBlock {
         name: "switchback-landing",
         at: [-14.5, 5.6, -3.0],
         size: [5.0, 2.4, 3.0],
-        color: "#438d86",
+        color: "#174c5c",
         yaw: 0.0,
     },
 ];
@@ -133,49 +133,49 @@ const HELIX_BLOCKS: &[RaceBlock] = &[
         name: "helix-pad",
         at: [0.0, 0.4, -4.0],
         size: [4.0, 0.8, 4.0],
-        color: "#6a5d9a",
+        color: "#35275e",
         yaw: 0.0,
     },
     RaceBlock {
         name: "helix-east",
         at: [5.0, 1.3, -7.0],
         size: [5.0, 1.0, 2.0],
-        color: "#3b8792",
+        color: "#164f63",
         yaw: -18.0,
     },
     RaceBlock {
         name: "helix-north",
         at: [7.0, 2.5, -12.0],
         size: [2.0, 1.2, 6.0],
-        color: "#3b8792",
+        color: "#164f63",
         yaw: 0.0,
     },
     RaceBlock {
         name: "helix-west",
         at: [1.5, 3.5, -16.5],
         size: [9.0, 0.8, 2.0],
-        color: "#3b8792",
+        color: "#164f63",
         yaw: 14.0,
     },
     RaceBlock {
         name: "helix-drop",
         at: [-5.0, 2.4, -19.5],
         size: [3.0, 2.0, 3.0],
-        color: "#b56c42",
+        color: "#5c274e",
         yaw: 0.0,
     },
     RaceBlock {
         name: "helix-rail",
         at: [-8.5, 2.8, -23.0],
         size: [0.6, 1.8, 5.0],
-        color: "#e1a44b",
+        color: "#6d3b20",
         yaw: 0.0,
     },
     RaceBlock {
         name: "helix-finish",
         at: [-11.0, 4.0, -28.0],
         size: [5.0, 2.4, 3.0],
-        color: "#6a5d9a",
+        color: "#35275e",
         yaw: 0.0,
     },
 ];
@@ -185,7 +185,7 @@ pub const ROUTES: [RaceDefinition; 3] = [
         id: 0,
         title: "Skyline Sprint",
         subtitle: "Rooftop stairs, a rail slide, and a high bridge",
-        theme: "#2d8192",
+        theme: "#00d7ed",
         start: [0.0, 0.0, 0.0],
         finish: [-9.5, 5.9, -25.0],
         blocks: SKYLINE_BLOCKS,
@@ -194,7 +194,7 @@ pub const ROUTES: [RaceDefinition; 3] = [
         id: 1,
         title: "Switchback Run",
         subtitle: "Vault the spine, shimmy the wall, leap the split",
-        theme: "#438d86",
+        theme: "#00e8c5",
         start: [0.0, 0.0, 0.0],
         finish: [-14.5, 6.9, -3.0],
         blocks: SWITCHBACK_BLOCKS,
@@ -203,7 +203,7 @@ pub const ROUTES: [RaceDefinition; 3] = [
         id: 2,
         title: "Helix Heights",
         subtitle: "A climbing spiral with a fast final drop",
-        theme: "#6a5d9a",
+        theme: "#b34dff",
         start: [0.0, 0.0, 0.0],
         finish: [-11.0, 5.2, -28.0],
         blocks: HELIX_BLOCKS,
@@ -228,6 +228,11 @@ pub fn start_position(id: u8) -> Vec3 {
 
 pub fn setup(w: &mut World, id: u8) {
     let route = definition(id);
+    let signal = match route.id {
+        0 => [0.04, 4.8, 6.0],
+        1 => [0.02, 5.6, 3.8],
+        _ => [3.3, 0.08, 6.4],
+    };
     for block in route.blocks {
         let mesh = Mesh::cuboid(Vec3::from_array(block.size));
         let rotation = Quat::from_rotation_y(block.yaw.to_radians());
@@ -245,6 +250,24 @@ pub fn setup(w: &mut World, id: u8) {
                 },
                 mesh,
                 Material::hex(block.color),
+            ),
+        );
+        // A readable signal edge turns every route block into part of the
+        // same nighttime wayfinding language as the skyline towers.
+        w.spawn_named(
+            format!("{}-signal", block.name),
+            (
+                Transform {
+                    position: Vec3::new(
+                        block.at[0],
+                        block.at[1] + block.size[1] * 0.5 + 0.035,
+                        block.at[2] - block.size[2] * 0.44,
+                    ),
+                    rotation,
+                    ..Transform::default()
+                },
+                Mesh::cuboid(Vec3::new(block.size[0] * 0.84, 0.055, 0.07)),
+                Material::glow(signal),
             ),
         );
     }

@@ -39,12 +39,62 @@ const fn pitched(mut b: Block, pitch: f32) -> Block {
     b
 }
 
-const VAULT: &str = "#c9793a";
-const LEDGE: &str = "#3f8f8a";
-const TOWER: &str = "#6b7f99";
-const GAP: &str = "#7d6aa8";
-const RAMP: &str = "#8a8f6a";
-const STEP: &str = "#9a8f7c";
+// The traversal blocks stay strongly separated by hue, but share the skyline's
+// ink-and-steel base so the neon edge strips read as intentional wayfinding.
+const VAULT: &str = "#263453";
+const LEDGE: &str = "#1d4e5d";
+const TOWER: &str = "#1a2340";
+const GAP: &str = "#302657";
+const RAMP: &str = "#24344d";
+const STEP: &str = "#34415e";
+
+const CITY_BODY: &str = "#11152b";
+const CITY_EDGE: &str = "#20264a";
+const CITY_GLASS: &str = "#28345b";
+const NEON_PINK: [f32; 3] = [5.8, 0.08, 2.4];
+const NEON_CYAN: [f32; 3] = [0.08, 5.2, 6.4];
+const NEON_VIOLET: [f32; 3] = [2.6, 0.12, 6.2];
+const NEON_AMBER: [f32; 3] = [6.0, 1.8, 0.08];
+
+struct CityTower {
+    name: &'static str,
+    at: [f32; 3],
+    size: [f32; 3],
+    accent: [f32; 3],
+}
+
+const SKYLINE: &[CityTower] = &[
+    CityTower {
+        name: "tower-neon-east",
+        at: [24.0, 8.5, -20.0],
+        size: [7.0, 17.0, 7.0],
+        accent: NEON_CYAN,
+    },
+    CityTower {
+        name: "tower-neon-west",
+        at: [-24.0, 11.0, -22.0],
+        size: [8.0, 22.0, 8.0],
+        accent: NEON_PINK,
+    },
+    CityTower {
+        name: "tower-neon-north",
+        at: [2.0, 7.0, -26.0],
+        size: [11.0, 14.0, 6.0],
+        accent: NEON_VIOLET,
+    },
+    CityTower {
+        name: "tower-neon-south",
+        at: [-23.0, 6.5, 16.0],
+        size: [9.0, 13.0, 9.0],
+        accent: NEON_AMBER,
+    },
+    CityTower {
+        name: "tower-neon-southeast",
+        at: [23.0, 5.5, 13.0],
+        size: [6.0, 11.0, 10.0],
+        accent: NEON_CYAN,
+    },
+];
 
 /// Slope of the ramp, degrees. Its high end is to the north (-Z).
 pub const RAMP_PITCH: f32 = 18.0;
@@ -134,6 +184,237 @@ pub fn named(name: &str) -> &'static Block {
         .unwrap_or_else(|| panic!("park: no block `{name}`"))
 }
 
+fn accent_material(accent: [f32; 3]) -> Material {
+    Material::glow(accent)
+}
+
+fn spawn_city_tower(w: &mut World, tower: &CityTower) {
+    let [x, y, z] = tower.at;
+    let [width, height, depth] = tower.size;
+    w.spawn_named(
+        tower.name,
+        (
+            Transform::at(x, y, z),
+            Mesh::cuboid(Vec3::new(width, height, depth)),
+            Material::hex(CITY_BODY).metallic(0.82).rough(0.24),
+        ),
+    );
+    w.spawn_named(
+        format!("{}-cap", tower.name),
+        (
+            Transform::at(x, y + height * 0.51, z),
+            Mesh::cuboid(Vec3::new(width * 1.08, 0.12, depth * 1.08)),
+            Material::hex(CITY_EDGE).metallic(0.7).rough(0.18),
+        ),
+    );
+    for (edge, offset) in [("left", -1.0), ("right", 1.0)] {
+        w.spawn_named(
+            format!("{}-edge-{edge}", tower.name),
+            (
+                Transform::at(x + offset * width * 0.48, y, z - depth * 0.5 - 0.035),
+                Mesh::cuboid(Vec3::new(0.09, height * 0.98, 0.07)),
+                accent_material(tower.accent),
+            ),
+        );
+    }
+    let floors = (height / 1.45).floor().max(3.0) as usize;
+    for floor in 0..floors {
+        let fy = y - height * 0.42 + floor as f32 * 1.45;
+        let tone = if floor % 3 == 0 {
+            tower.accent
+        } else if floor % 3 == 1 {
+            NEON_CYAN
+        } else {
+            NEON_PINK
+        };
+        for (side, offset) in [("front", -1.0), ("back", 1.0)] {
+            w.spawn_named(
+                format!("{}-window-{floor}-{side}", tower.name),
+                (
+                    Transform::at(x, fy, z + offset * depth * 0.5 + offset * 0.035),
+                    Mesh::cuboid(Vec3::new(width * 0.72, 0.14, 0.035)),
+                    accent_material(tone),
+                ),
+            );
+        }
+    }
+    let antenna_height = 2.0 + (height * 0.12).min(2.8);
+    w.spawn_named(
+        format!("{}-antenna", tower.name),
+        (
+            Transform::at(x, y + height * 0.58 + antenna_height * 0.5, z),
+            Mesh::cylinder(0.055, antenna_height),
+            accent_material(tower.accent),
+        ),
+    );
+    w.spawn_named(
+        format!("{}-halo", tower.name),
+        (
+            Transform::at(x, y + height * 0.58 + antenna_height, z),
+            Mesh::torus(0.42, 0.045),
+            accent_material(tower.accent),
+        ),
+    );
+    w.spawn_named(
+        format!("{}-beacon", tower.name),
+        (
+            Transform::at(x, y + height * 0.62 + antenna_height + 0.18, z),
+            Mesh::sphere(0.13),
+            accent_material(tower.accent),
+            PointLight {
+                color: tower.accent,
+                intensity: 80.0,
+                range: 12.0,
+            },
+        ),
+    );
+}
+
+fn spawn_rooftop_detail(
+    w: &mut World,
+    name: String,
+    position: Vec3,
+    mesh: Mesh,
+    material: Material,
+) {
+    w.spawn_named(
+        name.as_str(),
+        (
+            Transform::at(position.x, position.y, position.z),
+            mesh,
+            material,
+        ),
+    );
+}
+
+fn spawn_city_decorations(w: &mut World) {
+    for tower in SKYLINE {
+        spawn_city_tower(w, tower);
+    }
+
+    for (index, x, z, accent) in [
+        (0, -18.0, 5.0, NEON_CYAN),
+        (1, -8.0, 17.0, NEON_PINK),
+        (2, 15.0, 6.0, NEON_VIOLET),
+        (3, 18.0, -2.0, NEON_AMBER),
+    ] {
+        let name = format!("vent-bank-{index}");
+        spawn_rooftop_detail(
+            w,
+            format!("{name}-base"),
+            Vec3::new(x, 0.55, z),
+            Mesh::cuboid(Vec3::new(2.8, 1.1, 1.8)),
+            Material::hex(CITY_GLASS).metallic(0.72).rough(0.3),
+        );
+        for vent in [-0.85, 0.0, 0.85] {
+            spawn_rooftop_detail(
+                w,
+                format!("{name}-fan-{vent}"),
+                Vec3::new(x + vent, 1.18, z),
+                Mesh::cylinder(0.34, 0.08),
+                Material::hex(CITY_EDGE).metallic(0.86).rough(0.2),
+            );
+            spawn_rooftop_detail(
+                w,
+                format!("{name}-fan-glow-{vent}"),
+                Vec3::new(x + vent, 1.24, z),
+                Mesh::torus(0.28, 0.035),
+                accent_material(accent),
+            );
+        }
+        w.spawn_named(
+            format!("{name}-lamp"),
+            (
+                Transform::at(x, 1.8, z - 0.78),
+                Mesh::sphere(0.08),
+                accent_material(accent),
+                PointLight {
+                    color: accent,
+                    intensity: 38.0,
+                    range: 5.0,
+                },
+            ),
+        );
+    }
+
+    for (index, x, z, yaw, accent) in [
+        (0, -11.0, -1.8, 0.0, NEON_PINK),
+        (1, 11.0, -4.0, 0.4, NEON_CYAN),
+        (2, -3.0, 11.0, -0.35, NEON_VIOLET),
+    ] {
+        let pose = Transform {
+            position: Vec3::new(x, 2.3, z),
+            rotation: Quat::from_rotation_y(yaw),
+            ..Transform::default()
+        };
+        w.spawn_named(
+            format!("holo-sign-{index}"),
+            (
+                pose,
+                Mesh::cuboid(Vec3::new(3.8, 1.6, 0.08)),
+                accent_material(accent).alpha(0.72),
+            ),
+        );
+        w.spawn_named(
+            format!("holo-sign-{index}-frame"),
+            (
+                Transform {
+                    position: Vec3::new(x, 2.3, z - 0.06),
+                    rotation: Quat::from_rotation_y(yaw),
+                    ..Transform::default()
+                },
+                Mesh::cuboid(Vec3::new(4.05, 1.84, 0.04)),
+                accent_material(accent),
+            ),
+        );
+        w.spawn_named(
+            format!("holo-sign-{index}-light"),
+            (
+                Transform::at(x, 2.0, z + 0.4),
+                PointLight {
+                    color: accent,
+                    intensity: 65.0,
+                    range: 8.0,
+                },
+            ),
+        );
+    }
+
+    for (index, x, z, accent) in [
+        (0, -27.0, -2.0, NEON_CYAN),
+        (1, 27.0, 4.0, NEON_PINK),
+        (2, 2.0, 26.0, NEON_AMBER),
+    ] {
+        spawn_rooftop_detail(
+            w,
+            format!("antenna-mast-{index}"),
+            Vec3::new(x, 3.8, z),
+            Mesh::cylinder(0.08, 7.0),
+            Material::hex(CITY_EDGE).metallic(0.9).rough(0.16),
+        );
+        spawn_rooftop_detail(
+            w,
+            format!("antenna-ring-{index}"),
+            Vec3::new(x, 6.9, z),
+            Mesh::torus(0.48, 0.055),
+            accent_material(accent),
+        );
+        w.spawn_named(
+            format!("antenna-light-{index}"),
+            (
+                Transform::at(x, 7.2, z),
+                Mesh::sphere(0.14),
+                accent_material(accent),
+                PointLight {
+                    color: accent,
+                    intensity: 50.0,
+                    range: 8.0,
+                },
+            ),
+        );
+    }
+}
+
 /// A thing that rolls down the ramp. `spawned` is the tick it appeared.
 #[derive(Default, Component)]
 pub struct Roller {
@@ -202,7 +483,25 @@ pub fn setup(w: &mut World) {
                 Material::hex(b.color),
             ),
         );
+        if b.pitch == 0.0 {
+            let [width, _, depth] = b.size;
+            w.spawn_named(
+                format!("{}-neon-edge", b.name),
+                (
+                    Transform::at(b.at[0], b.top() + 0.035, b.at[2] - depth * 0.44),
+                    Mesh::cuboid(Vec3::new(width * 0.86, 0.055, 0.07)),
+                    accent_material(if b.name.starts_with("vault") {
+                        NEON_PINK
+                    } else if b.name.starts_with("ledge") {
+                        NEON_CYAN
+                    } else {
+                        NEON_VIOLET
+                    }),
+                ),
+            );
+        }
     }
+    spawn_city_decorations(w);
     w.insert_resource(Ramp::default());
 }
 
@@ -225,7 +524,12 @@ pub fn tick(w: &mut World) {
         return;
     }
     w.resource_mut::<Ramp>().released = released + 1;
-    release(w, released, RAMP_TOP + Vec3::X * lane(released), Vec3::Z * 1.5);
+    release(
+        w,
+        released,
+        RAMP_TOP + Vec3::X * lane(released),
+        Vec3::Z * 1.5,
+    );
 }
 
 // Rollers take the ramp's three lanes in turn.

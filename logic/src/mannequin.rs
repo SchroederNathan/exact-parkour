@@ -1,13 +1,19 @@
-//! Rounded mannequin shells on the existing humanoid skeleton. Rigid limb
-//! weights preserve the carved parts as the ball joints articulate; the torso
+//! Cyberpunk runner shells on the existing humanoid skeleton. Rigid limb
+//! weights preserve the articulated armor as the ball joints move; the torso
 //! alone blends across the spine so it can bend with the parkour animations.
 use exact_game::asset::{MaterialData, MeshData, Model};
 use exact_game::rig::Rig;
 use exact_game::{math, Vec3};
 
 const SIDES: usize = 32;
-const IVORY: [f32; 4] = [0.72, 0.53, 0.29, 1.0];
-const JOINT: [f32; 4] = [0.36, 0.25, 0.13, 1.0];
+const ARMOR: [f32; 4] = [0.19, 0.24, 0.32, 1.0];
+const JOINT: [f32; 4] = [0.055, 0.075, 0.12, 1.0];
+const EDGE: [f32; 4] = [0.33, 0.40, 0.52, 1.0];
+const CYAN: [f32; 4] = [0.04, 0.72, 0.88, 1.0];
+const MAGENTA: [f32; 4] = [0.84, 0.09, 0.40, 1.0];
+const VISOR: [f32; 4] = [0.02, 0.12, 0.18, 1.0];
+const GLOVE: [f32; 4] = [0.08, 0.11, 0.17, 1.0];
+const BOOT: [f32; 4] = [0.035, 0.045, 0.075, 1.0];
 
 // Distance along the part, half-width, half-depth. Rounded ends have one pole,
 // rather than a ring of coincident vertices and degenerate triangles.
@@ -127,7 +133,31 @@ impl Sculpt<'_> {
                 [0.96, width * taper * 0.45, depth * taper * 0.45],
                 [0.975, 0.0, 0.0],
             ],
-            IVORY,
+            ARMOR,
+        );
+    }
+
+    /// A short armored sleeve around a bone. The sleeve is a separate closed
+    /// shell so it can keep its crisp accent color while the underlying limb
+    /// continues to use the existing animation weights.
+    fn band(&mut self, name: &str, start: f32, end: f32, width: f32, depth: f32, color: [f32; 4]) {
+        let bone = &self.rig.bones()[self.joint(name)];
+        let from = bone.head / self.scale;
+        let to = bone.tail / self.scale;
+        let a = from.lerp(to, start);
+        let b = from.lerp(to, end);
+        self.shell(
+            name,
+            a,
+            b,
+            &[
+                [0.0, 0.0, 0.0],
+                [0.10, width, depth],
+                [0.52, width, depth],
+                [0.90, width * 0.90, depth * 0.90],
+                [1.0, 0.0, 0.0],
+            ],
+            color,
         );
     }
 
@@ -177,7 +207,7 @@ pub fn skin(model: &mut Model, rig: &Rig) {
             [0.97, 0.087, 0.062],
             [1.0, 0.0, 0.0],
         ],
-        IVORY,
+        ARMOR,
     );
     sculpt.ball("spine", v(0.0, 1.115, 0.0), v(0.063, 0.052, 0.060));
     sculpt.shell(
@@ -197,7 +227,7 @@ pub fn skin(model: &mut Model, rig: &Rig) {
             [0.985, 0.095, 0.057],
             [1.0, 0.0, 0.0],
         ],
-        IVORY,
+        ARMOR,
     );
     sculpt.ball("neck", v(0.0, 1.532, 0.0), v(0.043, 0.060, 0.043));
     sculpt.shell(
@@ -216,8 +246,29 @@ pub fn skin(model: &mut Model, rig: &Rig) {
             [0.985, 0.025, 0.024],
             [1.0, 0.0, 0.0],
         ],
-        IVORY,
+        // The runner's helmet is a sealed mask rather than an exposed head.
+        ARMOR,
     );
+
+    // A swept front visor, antenna collar and cheek rails give the silhouette
+    // a readable cyberpunk identity even at the camera's widest distance.
+    sculpt.shell(
+        "head",
+        v(0.0, 1.66, -0.078),
+        v(0.0, 1.66, -0.125),
+        &[
+            [0.0, 0.0, 0.0],
+            [0.12, 0.052, 0.030],
+            [0.34, 0.066, 0.034],
+            [0.66, 0.070, 0.036],
+            [0.88, 0.056, 0.030],
+            [1.0, 0.0, 0.0],
+        ],
+        VISOR,
+    );
+    sculpt.band("neck", 0.12, 0.88, 0.056, 0.050, MAGENTA);
+    sculpt.band("spine", 0.15, 0.38, 0.172, 0.112, CYAN);
+    sculpt.band("spine", 0.62, 0.84, 0.166, 0.108, MAGENTA);
 
     for (side, sign) in [("l", 1.0), ("r", -1.0)] {
         let n = |part: &str| format!("{part}_{side}");
@@ -226,6 +277,12 @@ pub fn skin(model: &mut Model, rig: &Rig) {
         sculpt.limb(&n("upper_arm"), 0.053, 0.056, 0.62, 0.051);
         sculpt.limb(&n("forearm"), 0.044, 0.047, 0.55, 0.031);
         sculpt.limb(&n("hand"), 0.034, 0.023, 0.66, 0.023);
+        sculpt.band(&n("thigh"), 0.20, 0.43, 0.085, 0.090, EDGE);
+        sculpt.band(&n("thigh"), 0.70, 0.86, 0.078, 0.082, MAGENTA);
+        sculpt.band(&n("shin"), 0.28, 0.60, 0.066, 0.068, CYAN);
+        sculpt.band(&n("upper_arm"), 0.03, 0.22, 0.066, 0.070, MAGENTA);
+        sculpt.band(&n("forearm"), 0.42, 0.78, 0.052, 0.052, CYAN);
+        sculpt.band(&n("hand"), 0.0, 0.82, 0.040, 0.027, GLOVE);
         let foot = n("foot");
         sculpt.ball(&foot, v(0.09 * sign, 0.098, -0.015), v(0.033, 0.037, 0.033));
         // A low, broad toe and raised instep, with the sole at ground level.
@@ -245,16 +302,19 @@ pub fn skin(model: &mut Model, rig: &Rig) {
                 [0.97, 0.027, 0.018],
                 [1.0, 0.0, 0.0],
             ],
-            IVORY,
+            BOOT,
         );
     }
     let mesh = sculpt.finish();
     model.bounds = mesh.bounds;
     model.meshes = vec![mesh];
     model.materials = vec![MaterialData {
-        name: "Satin maple mannequin".into(),
-        metallic: 0.0,
-        roughness: 0.46,
+        name: "Neon runner composite".into(),
+        base_color: [0.72, 0.82, 0.92, 1.0],
+        metallic: 0.78,
+        rim: 0.34,
+        roughness: 0.28,
+        emissive: [0.015, 0.055, 0.09],
         ..MaterialData::default()
     }];
 }

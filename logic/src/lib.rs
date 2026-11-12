@@ -104,12 +104,25 @@ impl Game for ExactBeatEmUp {
     fn setup(w: &mut World, args: &Options) {
         w.reseed(args.seed);
         w.insert_resource(TouchStick::default());
-        let sky = Color::hex("#9bb8c7");
+        // Deep blue night air lets the neon materials carry the skyline. The
+        // low ambient floor keeps dark armor readable while the emissive strips
+        // still bloom against the fog.
+        let sky = Color::hex("#050817");
         w.insert_resource(Environment {
             background: Some(sky),
+            zenith: [0.005, 0.012, 0.04],
+            horizon: [0.03, 0.08, 0.13],
+            ground: [0.003, 0.005, 0.01],
+            ambient: 0.72,
+            exposure: 1.08,
             fog: Some(Fog {
                 color: Some(sky),
-                ..Fog::new(0.018, 0.08)
+                ..Fog::new(0.012, 0.07)
+            }),
+            bloom: Some(Bloom {
+                threshold: 0.85,
+                intensity: 0.26,
+                radius: 1.8,
             }),
             ..Environment::default()
         });
