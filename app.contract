@@ -59,6 +59,11 @@ component ExactBeatEmUp
     race = 0
     playing = true
 
+  action chooseCity
+    mode = 3
+    race = 0
+    playing = true
+
   action togglePause
     paused = not paused
 
@@ -86,6 +91,12 @@ component ExactBeatEmUp
 
   action chooseArenaFromPause
     mode = 1
+    race = 0
+    again = not again
+    paused = false
+
+  action chooseCityFromPause
+    mode = 3
     race = 0
     again = not again
     paused = false
@@ -142,6 +153,10 @@ component ExactBeatEmUp
             column testId="combat-hud" position="absolute" top="calc(env(safe-area-inset-top) + 62px)" left="calc(env(safe-area-inset-left) + 20px)" gap=4 pointer-events="none"
               text `DAMAGE ${hud.hits} / 3` font-size=14 color=(hud.hits >= 2 ? "#ff7b7b" : "#c7d8e5") font-variant-numeric="tabular-nums"
               text hud.phase font-size=12 color="#dbe9f1"
+          if hud.mode == "city"
+            column testId="city-hud" position="absolute" top="calc(env(safe-area-inset-top) + 62px)" left="calc(env(safe-area-inset-left) + 20px)" gap=4 pointer-events="none"
+              text hud.subtitle padding=8 border-radius=10 background-color="#101822bb" font-size=14 color="#bff3ff"
+              text `STEP ${hud.phase}` font-size=12 color="#dbe9f1"
           if hud.finished
             text "FINISH" position="absolute" top="46%" left=0 right=0 padding=18 text-align="center" border-radius=16 background-color="#0b1824dd" font-size=30 font-weight=800
           if paused
@@ -155,6 +170,8 @@ component ExactBeatEmUp
                 text "Helix Heights"
               button press=chooseArenaFromPause testId="arena-holdout" aria-label="Rooftop Holdout"
                 text "Rooftop Holdout"
+              button press=chooseCityFromPause testId="city-neon" aria-label="Neon Rain"
+                text "Neon Rain"
           if touch
             button action="move" role="slider" appearance="none" testId="move" position="absolute" left="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom="calc(env(safe-area-inset-bottom) + 24px)" width=112 height=112 box-sizing="border-box" padding=0 border-radius=56 background-color="#101822aa" border="1px solid #d9edf580" touch-action="none" aria-label="Move"
               column position="absolute" left=13 top=13 width=84 height=84 box-sizing="border-box" border-radius=42 border="1px solid #d9edf530" pointer-events="none" aria-hidden=true
@@ -169,7 +186,7 @@ component ExactBeatEmUp
       else
         column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=20
           text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
-          text "Pick a route or hold the rooftop against escalating hordes." max-width="23.75rem" text-align="center" color="#b8c8ce"
+          text "Pick a route, hold the rooftop against escalating hordes, or climb the market street of Neon Rain to its pink sign." max-width="23.75rem" text-align="center" color="#b8c8ce"
           text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width="22.5rem" text-align="center" color="#b8c8ce"
           text "The camera follows your direction. Swipe or drag the scene to look around." max-width="22.5rem" text-align="center" color="#b8c8ce"
           row gap=12 flex-wrap="wrap" justify-content="center"
@@ -181,3 +198,5 @@ component ExactBeatEmUp
               text "Helix Heights"
             button buttonStyle="filled" press=chooseArena aria-label="Rooftop Holdout" testId="arena"
               text "Rooftop Holdout"
+            button buttonStyle="filled" press=chooseCity aria-label="Neon Rain" testId="city"
+              text "Neon Rain"
