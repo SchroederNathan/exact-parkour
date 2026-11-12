@@ -53,6 +53,8 @@ chunky stylized game art, flat matte colours, no text, no logos, plain white bac
 
 Choose the view that shows the most of the object. A Smart Topology model takes one image only.
 
+To make all the clothing images in an image chat tool, use the prompt in [Prompt for clothing reference images](clothing-image-prompt.md).
+
 ## Meshy settings
 
 Meshy's documentation gives these settings for a game character and for a low-poly game asset:
