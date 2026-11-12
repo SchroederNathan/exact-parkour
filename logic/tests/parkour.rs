@@ -15,7 +15,7 @@ type Game = Sim<ExactBeatEmUp>;
 const TICK_MS: f64 = 8.334;
 
 fn start() -> Game {
-    let mut game = Sim::new(Options {
+    let mut game = exact_game::sim_with_art!(Options {
         seed: 7,
         ..Options::default()
     })

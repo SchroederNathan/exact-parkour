@@ -27,6 +27,14 @@ pub const PARK: f32 = 30.0;
 pub const RACE_MODE: u32 = 0;
 pub const ARENA_MODE: u32 = 1;
 const LEGACY_MODE: u32 = 2;
+/// The start screen's view of the chosen body: it stands on open ground and the
+/// eye goes round it.
+pub const LOCKER_MODE: u32 = 3;
+/// Where the locker's eye starts from the body's centre, metres: in front of it,
+/// a little above. The body faces south there, into the sun. And how fast the eye
+/// goes round, radians a second.
+const LOCKER_EYE: Vec3 = Vec3::new(0.0, 0.12, 1.75);
+const LOCKER_TURN: f32 = 0.5;
 
 #[derive(Default, Component)]
 pub struct Player;
@@ -34,6 +42,9 @@ pub struct Player;
 #[derive(Args)]
 pub struct Options {
     pub seed: u64,
+    /// The body that the player has: 0 is the mannequin, 1 and 2 are the bodies of
+    /// `stickman::BODIES`. A change builds the world again.
+    pub character: u32,
     #[live]
     pub mode: u32,
     #[live]
@@ -48,6 +59,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             seed: 0,
+            character: 0,
             mode: LEGACY_MODE,
             race: 0,
             paused: false,
@@ -81,7 +93,15 @@ pub struct ExactBeatEmUp;
 impl Game for ExactBeatEmUp {
     const ID: &'static str = "exact-beat-em-up";
     const HZ: u32 = 120;
+    const ASSETS: &'static [&'static str] = &stickman::BODIES;
     type Args = Options;
+
+    fn validate(args: &Options) -> Result<(), String> {
+        if args.character as usize > stickman::BODIES.len() {
+            return Err(format!("character {} is not a body", args.character));
+        }
+        Ok(())
+    }
 
     fn actions() -> Actions {
         Actions::new()
@@ -156,7 +176,7 @@ impl Game for ExactBeatEmUp {
             );
         }
 
-        if args.mode != ARENA_MODE {
+        if args.mode != ARENA_MODE && args.mode != LOCKER_MODE {
             park::setup(w);
         }
         if args.mode == RACE_MODE {
@@ -164,12 +184,23 @@ impl Game for ExactBeatEmUp {
         }
 
         let rig = stickman::rig(body::HEIGHT);
-        let player_mesh = w
-            .generated_model(stickman::MODEL, stickman::model(&rig))
-            .unwrap();
+        let model = match args.character {
+            0 => stickman::model(&rig),
+            body => {
+                let name = stickman::BODIES[body as usize - 1];
+                let body = w.model(name).expect("setup waits for the bodies");
+                stickman::dressed(&rig, body).unwrap_or_else(|why| panic!("{name}: {why}"))
+            }
+        };
+        let player_mesh = w.generated_model(stickman::MODEL, model).unwrap();
         // The capsule stays upright; the visual is its child and does the turning.
         // It starts half a turn about Y: facing up the screen, away from the camera.
-        let half_turn = std::f32::consts::PI;
+        // In the locker it faces the other way, toward the eye.
+        let half_turn = if args.mode == LOCKER_MODE {
+            0.0
+        } else {
+            std::f32::consts::PI
+        };
         let player_start = if args.mode == RACE_MODE {
             race::start_position(args.race as u8)
         } else {
@@ -217,6 +248,10 @@ impl Game for ExactBeatEmUp {
             ),
         );
         camera::setup(w);
+        if args.mode == LOCKER_MODE {
+            camera::set_offset(w, LOCKER_EYE);
+            camera::present(w, body::Motion::default());
+        }
         w.spawn_named(
             "sun",
             (
@@ -239,10 +274,14 @@ impl Game for ExactBeatEmUp {
         }
         debug::commands(w, input);
         camera::input(w, input);
-        if args.mode == ARENA_MODE {
-            arena::tick(w);
-        } else {
-            park::tick(w);
+        match args.mode {
+            ARENA_MODE => arena::tick(w),
+            LOCKER_MODE => {
+                // Every tick, so a drag on the picture does not take the eye away.
+                let turn = LOCKER_TURN * w.tick() as f32 * w.dt();
+                camera::set_offset(w, Quat::from_rotation_y(turn) * LOCKER_EYE);
+            }
+            _ => park::tick(w),
         }
         let motion = body::step(w, input);
         physics::step(w);

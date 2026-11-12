@@ -14,7 +14,7 @@ const LANDSCAPE: Vec2 = Vec2::new(932.0, 430.0);
 const PORTRAIT: Vec2 = Vec2::new(430.0, 932.0);
 
 fn start() -> Game {
-    let mut sim = Sim::new(Options {
+    let mut sim = exact_game::sim_with_art!(Options {
         seed: 7,
         mode: ARENA_MODE,
         ..Options::default()
@@ -26,7 +26,7 @@ fn start() -> Game {
 
 // The obstacle park, where `start` is open ground.
 fn start_in_the_park() -> Game {
-    let mut sim = Sim::new(Options {
+    let mut sim = exact_game::sim_with_art!(Options {
         seed: 7,
         ..Options::default()
     })

@@ -5,7 +5,7 @@ use exact_beat_em_up_logic::{
 use exact_game::Sim;
 
 fn start() -> Sim<ExactBeatEmUp> {
-    Sim::<ExactBeatEmUp>::new(Options {
+    exact_game::sim_with_art!(Options {
         seed: 17,
         mode: ARENA_MODE,
         ..Options::default()

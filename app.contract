@@ -22,6 +22,7 @@ component ExactBeatEmUp
   state again = false
   state mode = 0
   state race = 0
+  state character = 1
   state home = ""
   state under = ""
   state lent = false
@@ -38,6 +39,12 @@ component ExactBeatEmUp
   derive slideRight = narrow ? "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 34px)" : "calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 136px)"
   derive slideBottom = narrow ? "calc(env(safe-area-inset-bottom) + 228px)" : "calc(env(safe-area-inset-bottom) + 120px)"
   derive jumpBottom = narrow ? "calc(env(safe-area-inset-bottom) + 24px)" : "calc(env(safe-area-inset-bottom) + 56px)"
+
+  action pickRunnerA
+    character = 1
+
+  action pickRunnerB
+    character = 2
 
   action chooseRace0
     mode = 0
@@ -121,7 +128,7 @@ component ExactBeatEmUp
   view
     main width="100%" height="100%" position="relative" viewport-fit="cover" background-color="#101822" color="#f4f7f8"
       if playing
-        canvas surface=world(seed=7, mode=mode, race=race, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden" touch-action="none"
+        canvas surface=world(seed=7, character=character, mode=mode, race=race, paused=paused, restart=again) testId="world" width="100%" height="100%" position="absolute" top=0 left=0 right=0 bottom=0 overflow="hidden" touch-action="none"
           row position="absolute" top="calc(env(safe-area-inset-top) + 12px)" left="calc(env(safe-area-inset-left) + 20px)" right="calc(env(safe-area-inset-right) + 20px)" justify-content="space-between" pointer-events="none"
             row gap=8 pointer-events="auto"
               if hud.mode == "arena"
@@ -167,17 +174,26 @@ component ExactBeatEmUp
             button action="jump" id="jump" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="jump" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 box-sizing="border-box" padding=0 border-radius=48 background-color="#244a60dd" border="1px solid #d9edf5aa" color="#ffffff" display="flex" align-items="center" justify-content="center" aria-label="Jump"
               text "Jump" font-size=16 font-weight=700 pointer-events="none"
       else
-        column width="100%" height="100%" box-sizing="border-box" padding=32 align-items="center" justify-content="center" gap=20
-          text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
-          text "Pick a route or hold the rooftop against escalating hordes." max-width="23.75rem" text-align="center" color="#b8c8ce"
-          text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width="22.5rem" text-align="center" color="#b8c8ce"
-          text "The camera follows your direction. Swipe or drag the scene to look around." max-width="22.5rem" text-align="center" color="#b8c8ce"
-          row gap=12 flex-wrap="wrap" justify-content="center"
-            button buttonStyle="filled" press=chooseRace0 autofocus aria-label="Skyline Sprint" testId="play"
-              text "Skyline Sprint"
-            button buttonStyle="filled" press=chooseRace1 aria-label="Switchback Run" testId="race-switchback"
-              text "Switchback Run"
-            button buttonStyle="filled" press=chooseRace2 aria-label="Helix Heights" testId="race-helix"
-              text "Helix Heights"
-            button buttonStyle="filled" press=chooseArena aria-label="Rooftop Holdout" testId="arena"
-              text "Rooftop Holdout"
+        row width="100%" height="100%" box-sizing="border-box" padding=24 align-items="center" justify-content="center" gap=28 flex-wrap="wrap" overflow="auto"
+          column align-items="center" gap=10
+            canvas surface=world(seed=3, character=character, mode=3, race=0, paused=false, restart=false) testId="locker" aria-label=(character == 1 ? "Ash, turning" : "Ember, turning") width=210 height=264 border-radius=16 overflow="hidden" pointer-events="none"
+            text "Choose a runner" font-size=14 font-weight=700 color="#b8c8ce"
+            row role="radiogroup" aria-label="Runner" gap=8
+              button role="radio" appearance="none" aria-checked=(character == 1) press=pickRunnerA testId="runner-a" aria-label="Ash" min-width=88 padding=10 border-radius=12 background-color=(character == 1 ? "#2b5364" : "#101822") border=(character == 1 ? "2px solid #d9edf5" : "2px solid #3a5566") color="#ffffff"
+                text "Ash" font-weight=700
+              button role="radio" appearance="none" aria-checked=(character == 2) press=pickRunnerB testId="runner-b" aria-label="Ember" min-width=88 padding=10 border-radius=12 background-color=(character == 2 ? "#2b5364" : "#101822") border=(character == 2 ? "2px solid #d9edf5" : "2px solid #3a5566") color="#ffffff"
+                text "Ember" font-weight=700
+          column align-items="center" justify-content="center" gap=16 max-width="26rem"
+            text "ROOFTOP RUMBLE" role="heading" font-size=42 font-weight=700 letter-spacing=2 text-align="center"
+            text "Pick a route or hold the rooftop against escalating hordes." max-width="23.75rem" text-align="center" color="#b8c8ce"
+            text "WASD or arrows move. Shift sprints. Space jumps. C slides." max-width="22.5rem" text-align="center" color="#b8c8ce"
+            text "The camera follows your direction. Swipe or drag the scene to look around." max-width="22.5rem" text-align="center" color="#b8c8ce"
+            row gap=12 flex-wrap="wrap" justify-content="center"
+              button buttonStyle="filled" press=chooseRace0 autofocus aria-label="Skyline Sprint" testId="play"
+                text "Skyline Sprint"
+              button buttonStyle="filled" press=chooseRace1 aria-label="Switchback Run" testId="race-switchback"
+                text "Switchback Run"
+              button buttonStyle="filled" press=chooseRace2 aria-label="Helix Heights" testId="race-helix"
+                text "Helix Heights"
+              button buttonStyle="filled" press=chooseArena aria-label="Rooftop Holdout" testId="arena"
+                text "Rooftop Holdout"

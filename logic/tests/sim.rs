@@ -10,7 +10,7 @@ use exact_game_physics::CapsuleController;
 const TICK_MS: f64 = 8.334;
 
 fn start() -> Sim<ExactBeatEmUp> {
-    let mut game = Sim::new(Options {
+    let mut game = exact_game::sim_with_art!(Options {
         seed: 7,
         ..Options::default()
     })
@@ -258,7 +258,8 @@ fn touch_hud_shows_analog_direction_and_recenters_on_release_or_cancel() {
     };
     for mode in [RACE_MODE, ARENA_MODE] {
         for end in [PointerPhase::Up, PointerPhase::Cancel] {
-            let mut game = Sim::<ExactBeatEmUp>::new(Options { mode, ..Options::default() }).unwrap();
+            let mut game: Sim<ExactBeatEmUp> =
+                exact_game::sim_with_art!(Options { mode, ..Options::default() }).unwrap();
             game.input(control(PointerPhase::Down, 56.0, 56.0));
             game.input(control(PointerPhase::Move, 86.0, 26.0));
             game.run(25.0);

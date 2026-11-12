@@ -54,3 +54,15 @@ test "The holdout opens with combat HUD"
   tap "arena"
   clock +100
   expect tree has "combat-hud"
+
+test "The start screen shows the chosen runner and takes it into the level"
+  expect tree has "locker"
+  expect state character == 1
+  tap "runner-b"
+  expect state character == 2
+  tap "runner-a"
+  expect state character == 1
+  tap "runner-b"
+  tap "play"
+  expect tree has "world"
+  expect tree missing "locker"

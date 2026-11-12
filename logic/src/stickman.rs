@@ -987,8 +987,19 @@ fn smooth(u: f32) -> f32 {
     u * u * (3.0 - 2.0 * u)
 }
 
-/// The skinned model with every clip the Animator and its layers name.
+/// The mannequin: the skinned model with every clip the Animator and its layers name.
 pub fn model(rig: &Rig) -> Model {
+    let mut model = bare(rig);
+    crate::mannequin::skin(&mut model, rig);
+    model
+}
+
+/// The asset names of the bodies in `art/`, in the order of `Options::character`
+/// from 1. Character 0 is the mannequin.
+pub const BODIES: [&str; 2] = ["body_a.model", "body_b.model"];
+
+// The rig's joints and every clip, under the engine's own capsule skin.
+fn bare(rig: &Rig) -> Model {
     let mut clips = vec![
         // A relaxed stand, as long as the slowest gait so the blend between them
         // keeps its period: elbows a little bent, arms a little off the body.
@@ -1020,9 +1031,37 @@ pub fn model(rig: &Rig) -> Model {
     clips.extend(crate::air::clips(rig));
     clips.extend(crate::rise::clips(rig));
     clips.extend(PACES.iter().map(|p| gait::clip(rig, p)));
-    let mut model = rig.model(clips);
-    crate::mannequin::skin(&mut model, rig);
-    model
+    rig.model(clips)
+}
+
+/// A body from `art/` in place of the mannequin: its mesh, material and texture
+/// on the rig's joints, with every clip. `tools/fit_body.py` exports such a body
+/// with the rig's joints by name, each at the rig's place, so a vertex needs only
+/// the number that the rig gives its joint.
+pub fn dressed(rig: &Rig, body: &Model) -> Result<Model, String> {
+    let (Some(skin), [mesh]) = (body.skins.first(), body.meshes.as_slice()) else {
+        return Err("a body is one skinned mesh".into());
+    };
+    let mut joints = Vec::with_capacity(skin.joints.len());
+    for &joint in &skin.joints {
+        let name = &body.nodes[joint as usize].name;
+        joints.push(rig.bones().iter().position(|bone| &bone.name == name));
+    }
+    let mut mesh = mesh.clone();
+    for (joint, &weight) in mesh.joints.iter_mut().zip(&mesh.weights) {
+        *joint = match joints.get(*joint as usize) {
+            Some(Some(index)) => *index as u16,
+            // A joint that the rig does not have may be listed, but it moves nothing.
+            _ if weight == 0.0 => 0,
+            _ => return Err("a vertex follows a joint that the rig does not have".into()),
+        };
+    }
+    let mut model = bare(rig);
+    model.bounds = mesh.bounds;
+    model.meshes = vec![mesh];
+    model.materials = body.materials.clone();
+    model.textures = body.textures.clone();
+    Ok(model)
 }
 
 /// One state per `Act`, and from each an edge to every other on the number `act`.
