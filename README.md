@@ -2,6 +2,16 @@
 
 Rooftop Rumble is a small Exact game prototype. An articulated wooden mannequin runs, vaults, climbs, rolls and falls through an obstacle park. The player and every object share one Rapier physics world with real gravity.
 
+## Levels
+
+| Level | What it is |
+|---|---|
+| Skyline Sprint, Switchback Run, Helix Heights | Three race routes over the obstacle park |
+| Rooftop Holdout | Hold the roof against waves of enemies |
+| Neon Rain | A market street at night in the rain. Climb from the street to the pink sign. See [the level plan](docs/neon-rain-level-plan.md) |
+
+![Neon Rain](docs/neon-rain/2-street.jpg)
+
 ## Controls
 
 | | Keyboard | Gamepad | Touch |
@@ -89,6 +99,9 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 - `logic/src/ledge.rs`: finds the top edge of a wall with the physics queries. The vault, the climb, the grab and the shimmy all use it.
 - `logic/src/hold.rs`: what the hands and feet hold. A move names the points on the wall, and after the Animator has posed the body the engine's two-bone solver puts each wrist and ankle on its point. A limb holds only what it can reach, and goes nowhere in one tick.
 - `logic/src/park.rs`: the park as one table of blocks, and the ramp's rollers.
+- `logic/src/city.rs`: Neon Rain. Its buildings, route, signs and lights are tables. It also has the rain, the cloud and the steam.
+- `logic/src/kit.rs`: the parts of the city. A surface is a set of repeating textures. A piece is one model from `art/` with the boxes that the body stands on. All textured boxes of a district go into one model, `art/district.gltf`.
+- `tools/prepare-art.py`, `tools/prepare-textures.py`: make the files in `art/` from Meshy's output. See [Generating assets](docs/asset-generation.md).
 - `logic/src/ragdoll.rs`: fifteen points held together by constraints. The engine's physics has no joints, so the ragdoll is solved here and collides through the physics queries.
 - `logic/src/rise.rs`: the two get-ups. Each is a list of stages that place the hips, wrists and ankles; the engine's two-bone solver turns the limbs to reach them, so a planted hand or foot does not move.
 - `logic/src/gait.rs`, `logic/src/locomotion.rs`: the gait clips and the clock that keeps planted feet still.
@@ -99,13 +112,14 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 81 hostless tests and the determinism lints.
+`bun exact.mjs test-rust` bakes `art/`, then runs 93 hostless tests and the determinism lints.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
 - `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides on level ground, through a turn to each side, and down and up the ramp, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick. Another runs 16 catches and climbs and fails if a joint shakes on the wall: if the change of its speed turns round from one tick to the next by more than 0.075 m.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
+- `logic/tests/city.rs`: Neon Rain. Each rise of the route is within the limit of its move. The body stands at the end of each step, runs the walkway, the fire escape and the skybridge, and runs the full route from the street to the sign with the stick and Jump only. `art/district.gltf` is what the code builds.
 
 To see one move tick by tick, run the ignored `trace` test. It prints where the hips, shoulders and holds are and which bone, if any, is in the wall:
 

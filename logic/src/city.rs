@@ -186,7 +186,7 @@ const GREEN: [f32; 3] = [0.3, 1.0, 0.55];
 const WHITE: [f32; 3] = [0.82, 0.9, 1.0];
 
 /// A light with no body. `candela` lights a surface `d` metres away with
-/// `candela / d²` lux; the moon gives 900 lux.
+/// `candela / d²` lux; the moon gives 1,600 lux.
 fn lamp(w: &mut World, name: &str, at: Vec3, color: [f32; 3], candela: f32, range: f32) -> Entity {
     w.spawn_named(
         name,
@@ -372,9 +372,9 @@ pub fn setup(w: &mut World) {
         zenith: [0.012, 0.016, 0.035],
         horizon: [0.07, 0.05, 0.11],
         ground: [0.02, 0.016, 0.028],
-        ambient: 0.9,
+        ambient: 1.0,
         sun_disc: 0.0,
-        exposure: 1.15,
+        exposure: 1.4,
         fog: Some(Fog {
             color: Some(haze),
             ..Fog::new(0.011, 0.045)
@@ -388,7 +388,7 @@ pub fn setup(w: &mut World) {
     });
     w.insert_resource(EnvironmentMap {
         texture: "sky.tex".into(),
-        intensity: 0.55,
+        intensity: 1.25,
         rgbm: 0.0,
         visible: true,
         rotation: 0.6,
@@ -399,7 +399,7 @@ pub fn setup(w: &mut World) {
             Transform::at(-14.0, 30.0, 12.0).looking_at(Vec3::new(0.0, 0.0, -18.0), Vec3::Y),
             DirectionalLight {
                 color: [0.55, 0.66, 1.0],
-                illuminance: 900.0,
+                illuminance: 1600.0,
                 shadows: true,
             },
         ),
@@ -454,13 +454,13 @@ pub fn setup(w: &mut World) {
             Mesh::torus(0.75, 0.05),
             Material {
                 color: [0.05, 0.3, 0.35, 1.0],
-                emissive: [0.4, 2.6, 3.0],
+                emissive: [0.15, 1.1, 1.3],
                 ..Material::default()
             },
             PointLight {
                 color: CYAN,
-                intensity: 5000.0,
-                range: 9.0,
+                intensity: 3500.0,
+                range: 8.0,
             },
         ),
     );
@@ -618,7 +618,8 @@ fn roofs(w: &mut World) {
 }
 
 /// Rain that falls round the body, and a layer of low cloud that drifts over
-/// the roofs. The rain is 1,300 streaks at most and the cloud 60 puffs.
+/// the roofs. The rain is 1,300 streaks at most and the cloud 60 puffs; five
+/// vents add 18 puffs of steam each.
 fn weather(w: &mut World) {
     w.spawn_named(
         "rain",
@@ -651,26 +652,28 @@ fn weather(w: &mut World) {
             Ambient,
         ),
     );
+    // The cloud fills its box in the first seconds: each puff appears in place,
+    // drifts east and thins out as it ages.
     w.spawn_named(
         "clouds",
         (
             Transform {
-                position: Vec3::new(-70.0, 46.0, -14.0),
+                position: Vec3::new(-10.0, 52.0, -14.0),
                 // The emitter throws along its own +Y: lay it over to drift east.
                 rotation: Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2),
                 ..Transform::default()
             },
             Emitter {
-                shape: Spawn::Box(Vec3::new(10.0, 9.0, 150.0)),
-                rate: 1.5,
-                lifetime: 40.0,
-                speed: 3.6,
-                spread: 0.12,
+                shape: Spawn::Box(Vec3::new(14.0, 230.0, 230.0)),
+                rate: 2.5,
+                lifetime: 24.0,
+                speed: 2.2,
+                spread: 0.1,
                 gravity: Vec3::ZERO,
-                size: [46.0, 58.0],
-                color: [[0.22, 0.18, 0.34, 0.5], [0.14, 0.2, 0.3, 0.42]],
+                size: [44.0, 62.0],
+                color: [[0.24, 0.19, 0.36, 0.55], [0.13, 0.2, 0.3, 0.0]],
                 additive: false,
-                bound: [-30.0, -30.0, -110.0, 190.0, 30.0, 110.0],
+                bound: [-40.0, -150.0, -130.0, 40.0, 190.0, 130.0],
                 seed: 5,
                 ..Emitter::default()
             },
@@ -681,6 +684,45 @@ fn weather(w: &mut World) {
             Ambient,
         ),
     );
+    // Steam from the kitchens and the roof machines.
+    for (i, at) in [
+        [-4.9, 2.9, -6.2],
+        [4.9, 2.9, 4.2],
+        [4.9, 2.9, -22.4],
+        [-12.0, 6.6, -6.0],
+        [11.6, 10.4, -25.4],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        w.spawn_named(
+            &format!("steam-{i}"),
+            (
+                Transform::at(at[0], at[1], at[2]),
+                Emitter {
+                    shape: Spawn::Sphere(0.25),
+                    rate: 5.0,
+                    lifetime: 3.6,
+                    speed: 0.9,
+                    spread: 0.35,
+                    gravity: Vec3::new(0.25, 0.5, 0.0),
+                    drag: 0.5,
+                    size: [0.5, 2.6],
+                    color: [[0.78, 0.76, 0.86, 0.2], [0.7, 0.72, 0.85, 0.0]],
+                    additive: false,
+                    bound: [-3.0, -0.5, -3.0, 4.0, 6.0, 3.0],
+                    seed: 20 + i as u64,
+                    ..Emitter::default()
+                },
+                ParticleLook {
+                    texture: "cloud.tex".into(),
+                    soft: 0.4,
+                    ..ParticleLook::default()
+                },
+                Ambient,
+            ),
+        );
+    }
 }
 
 /// The rain starts this far above the body's feet.

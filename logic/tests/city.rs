@@ -1,7 +1,7 @@
 //! Neon Rain: the district's model file is what the code builds, every step of the route is
 //! within what the body can climb and jump, and the body stands and runs on the
 //! pieces the route crosses.
-use exact_beat_em_up_logic::body::{self, Parkour, HALF};
+use exact_beat_em_up_logic::body::{self, Action, Parkour, HALF};
 use exact_beat_em_up_logic::city::{self, CityState, ROUTE};
 use exact_beat_em_up_logic::kit;
 use exact_beat_em_up_logic::{ExactBeatEmUp, Options, CITY_MODE};
@@ -198,4 +198,96 @@ fn the_district_file_is_what_the_code_builds() {
     assert!(on_disk == json, "art/district.gltf is stale: run this test with EXPORT=1");
     let on_disk = std::fs::read(format!("{art}/district.bin")).unwrap_or_default();
     assert!(on_disk == bin, "art/district.bin is stale: run this test with EXPORT=1");
+}
+
+fn action(game: &Game) -> Action {
+    game.get::<Parkour>("player").unwrap().action.clone()
+}
+
+/// Run the body to `to` (its feet) as a player would: push the stick at it, press
+/// Jump when a wall stops the body below the place it wants, and press Jump again
+/// on a hang to climb. With `lip`, press Jump once when the feet pass that Z going
+/// north: the jump over a gap.
+#[track_caller]
+fn leg(game: &mut Game, what: &str, to: Vec3, lip: Option<f32>) {
+    let mut stopped = 0.0;
+    let mut since_jump = 1000.0;
+    let mut leapt = false;
+    for _ in 0..(12_000 / 25) {
+        let at = feet(game);
+        let flat = Vec3::new(to.x - at.x, 0.0, to.z - at.z);
+        let doing = action(game);
+        if flat.length() < 0.5 && (at.y - to.y).abs() < 0.12 && matches!(doing, Action::Ground) {
+            return;
+        }
+        steer(game, flat);
+        let speed = {
+            let v = game.get::<CapsuleController>("player").unwrap().velocity;
+            Vec3::new(v.x, 0.0, v.z).length()
+        };
+        stopped = if speed < 0.7 { stopped + 25.0 } else { 0.0 };
+        since_jump += 25.0;
+        let wants_up = to.y > at.y + 0.3;
+        let jump = match doing {
+            Action::Hang(_) => since_jump > 350.0,
+            Action::Ground => {
+                (wants_up && stopped > 150.0 && since_jump > 500.0)
+                    || lip.is_some_and(|z| !leapt && at.z < z)
+            }
+            _ => false,
+        };
+        if jump {
+            leapt |= lip.is_some();
+            game.tap("Space");
+            since_jump = 0.0;
+        }
+        game.run(25.0);
+    }
+    panic!("{what}: at {} doing {:?}, wanted {to}", feet(game), action(game));
+}
+
+/// The whole route with the stick and the Jump button only, from the street to
+/// the sign. Each leg ends where the next begins.
+#[test]
+fn the_route_can_be_run_from_the_street_to_the_sign() {
+    let mut game = start();
+    game.run(200.0);
+    let roof = |name: &str| city::named(name).roof;
+    let deck = city::WALKWAY_AT.y + kit::WALKWAY_DECK;
+    let bridge = city::SKYBRIDGE_AT.y + kit::SKYBRIDGE_TOP;
+    let escape = city::ESCAPE_AT;
+    let legs: &[(&str, Vec3, Option<f32>)] = &[
+        ("into the street", Vec3::new(-1.5, 0.0, 3.0), None),
+        ("to the crate", Vec3::new(-4.3, 0.0, -0.5), None),
+        ("onto the crate", Vec3::new(city::CRATE_AT.x, city::CRATE.y, city::CRATE_AT.z), None),
+        ("onto the stall", Vec3::new(-4.7, kit::STALL_ROOF, -4.2), None),
+        ("onto west-low", Vec3::from_array(ROUTE[0].at), None),
+        ("to the walkway", Vec3::new(-7.8, roof("west-low"), city::WALKWAY_AT.z), None),
+        ("onto its deck", Vec3::new(-5.4, deck, city::WALKWAY_AT.z), None),
+        ("through the walkway", Vec3::from_array(ROUTE[1].at), None),
+        ("to the fire escape", escape + Vec3::new(-1.9, kit::ESCAPE_LOW, 0.9), None),
+        ("up its steps", escape + Vec3::new(1.9, kit::ESCAPE_MID, 1.15), None),
+        ("onto its top landing", escape + Vec3::new(1.4, kit::ESCAPE_TOP, -0.9), None),
+        ("onto east-high", Vec3::from_array(ROUTE[2].at), None),
+        ("to the skybridge", Vec3::new(8.3, roof("east-high"), city::SKYBRIDGE_AT.z), None),
+        ("onto its roof", Vec3::new(5.4, bridge, city::SKYBRIDGE_AT.z), None),
+        ("over the skybridge", Vec3::new(-5.6, bridge, city::SKYBRIDGE_AT.z), None),
+        ("onto west-high", Vec3::from_array(ROUTE[3].at), None),
+        ("to the alley", Vec3::new(-7.5, roof("west-high"), -27.4), None),
+        ("over the alley", Vec3::new(-7.5, roof("north"), -33.6), Some(city::named("west-high").z[0] + 0.4)),
+        ("to the sign", Vec3::from_array(ROUTE[4].at), None),
+    ];
+    for (i, (what, to, lip)) in legs.iter().enumerate() {
+        if lip.is_some() {
+            game.key_down("ShiftLeft");
+        }
+        leg(&mut game, &format!("leg {i}, {what}"), *to, *lip);
+        if lip.is_some() {
+            game.key_up("ShiftLeft");
+        }
+    }
+    game.run(100.0);
+    assert_eq!(game.world().resource::<CityState>().step as usize, ROUTE.len());
+    let seconds = game.world().published("seconds").unwrap().as_number().unwrap();
+    assert!(seconds < 120.0, "the route took {seconds} s");
 }

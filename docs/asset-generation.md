@@ -1,12 +1,19 @@
 # Generating assets
 
-This is the current practice for making 3D models for Rooftop Rumble with AI tools. It was written on 2026-11-11. The tools are installed and tested, but no generated model is in the game yet. The last section lists what is not proven.
+This is the current practice for making 3D models for Rooftop Rumble with AI tools. It was written on 2026-11-11 and changed on 2026-11-12, after the 19 models of Neon Rain went through it. The last section lists what is not proven.
 
 ## The rule
 
 Generate one object at a time from a reference image, clean it in Blender, and export one `.glb` into `art/`.
 
 Do not build a character from primitives with a Blender script. That method was tried in `blender_variants/` and the result was rejected. Do not ask a generator for a dressed character or for a set of parts. Meshy's documentation says to use one object for each image.
+
+## Two styles
+
+| Use | Style |
+|---|---|
+| The character and its clothes | Chunky stylized art. Use the style line in "Prompt pattern" |
+| The district of Neon Rain | Realistic. The reference image is the style, because `meshy-n1` takes the texture from the image |
 
 ## Tools
 
@@ -30,6 +37,46 @@ The Blender server has a `generate_3d` tool. It has no setting for a face count 
 6. **Clean it in Blender.** See the checks below.
 7. **Export one `.glb` into `art/`.** The bake makes `<stem>.model`.
 8. **Run `bun exact.mjs test-rust`.** The bake names anything that it refuses.
+
+## From a reference sheet
+
+A sheet shows one object in many views. Meshy needs one object in one image.
+
+1. Crop the largest three-quarter view from the sheet. Scale the crop so that its long side is 1024 pixels or more.
+2. If the crop shows a wall, a second object, or an object cut by the edge, make a clean image first. Use `meshy_image_to_image` with `nano-banana-pro` and the crop as the reference. Ask for the object alone, complete, in a three-quarter view on a plain mid-grey background, and name what to remove.
+3. Make the model from the crop (`file_path`) or from the clean image (`input_task_id`).
+
+Seven of the 19 district sheets needed step 2: the zipline anchor, the pole, the skybridge, the ladder, the fire escape, the awning and the covered walkway.
+
+## Scripts
+
+| Script | What it does |
+|---|---|
+| `tools/prepare-art.py` | Blender, no window. Scales each raw model to metres, sets its origin, ticks Backface Culling, makes a glow image, sets the image sizes, and writes `art/<name>.glb` and `art/<name>-far.glb`. Its `SPECS` table has one line for each model |
+| `tools/prepare-textures.py` | Makes the repeating surfaces in `art/textures` and `art/data` from generated images: normal maps, puddles, lit windows, the sky map, the signs |
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender -b --python tools/prepare-art.py -- <raw dir> art
+uv run --with pillow --with numpy python tools/prepare-textures.py <image dir> art
+```
+
+A raw model from Meshy is about one unit long. Its front faces +Z in the game and its length is along X. This was the same for all 19 models.
+
+`prepare-art.py` prints `DECK` lines: the flat tops of each model, with their height and extent. Use them to write the boxes of a `Piece` in `logic/src/kit.rs`.
+
+## Image sizes
+
+The bake writes each image three times: RGBA8, BC and ASTC. The web build stops when the baked `assets/` folder is over about 380 MB. The error is `ENOBUFS` from `scripts/filesystem.mjs`.
+
+| Image | Size |
+|---|---|
+| Base colour of a model | 1024 |
+| Base colour of a `-far` model | 256 |
+| Glow image | 512 |
+| Repeating surface, base colour | 1024 |
+| Normal, roughness and window glow maps | 512 |
+
+With these sizes the 19 models and 28 textures bake to 309 MB.
 
 ## Prompt pattern
 
@@ -64,7 +111,7 @@ Meshy's documentation gives these settings for a game character and for a low-po
 | `model_type` | `smart-topology` |
 | `ai_model` | `meshy-t2.5` (100 to 30,000 faces). `meshy-t2` is faster (100 to 15,000 faces) |
 | `texture_model` | `meshy-n1`. It makes a 2K base colour from the reference image and takes no text prompt |
-| `target_polycount` | Our budget: 10,000 to 15,000 for a body, 1,000 to 3,000 for an item or a small prop |
+| `target_polycount` | Our budget: 10,000 to 15,000 for a body, 1,000 to 3,000 for an item or a small prop, 6,000 to 20,000 for a piece of a building |
 | `pose_mode` | `a-pose` for a body. Leave it out for an object |
 
 Smart Topology gives triangles only. Do not ask for quads with it. Do not make a Meshy 7.1 model and then reduce it to a face count.
@@ -113,11 +160,19 @@ Order of work:
 
 Meshy refunds only a task that fails. A model that completes but looks bad still costs its credits. One body and 20 items cost about 450 credits with no retries. `meshy_check_balance` is free.
 
+The district of Neon Rain cost 472 credits on 2026-11-12: 19 models, 7 clean reference images and 11 texture images. No task was run twice.
+
+## Proven on 2026-11-12
+
+- A Meshy GLB goes through the bake after `tools/prepare-art.py`. The export uses JPEG images, no vertex colours and no tangents.
+- Smart Topology with `meshy-t2.5` and `meshy-n1` gives a usable building piece from one image at 6,000 to 20,000 faces.
+- A model built in code (`generated_model`) can use textures only if they are in `Game::ASSETS`, which makes every mode wait for them. For that reason the district's boxes are written to `art/district.gltf` by a test. The glTF names the images under `art/textures` and `art/data` by path, so the bake shares them.
+
 ## Not proven yet
 
-- No generated model has gone through the bake. The texture format and the material extensions of a Meshy GLB are not checked.
 - The engine has not been tested with two skinned models on one skeleton. Test one shirt before you make more.
 - The player is a model that `logic/src/stickman.rs` builds from a code rig, with clips made in code. A generated body must use that skeleton, or the animation code must change. This is not decided.
-- The prompts above have not been run. Adjust the style line on the first five images, then keep it fixed.
+- The character prompts above have not been run. Adjust the style line on the first five images, then keep it fixed.
+- The district was not run on a phone. Its frame time is not known there.
 
 Update this document when one of these points is proven or changes.
