@@ -5,6 +5,7 @@ pub mod air;
 pub mod arena;
 pub mod body;
 pub mod camera;
+pub mod city;
 pub mod climb;
 pub mod debug;
 pub mod flow;
@@ -13,6 +14,7 @@ pub mod hold;
 pub mod ledge;
 pub mod locomotion;
 mod mannequin;
+pub mod kit;
 pub mod park;
 pub mod race;
 pub mod ragdoll;
@@ -29,12 +31,14 @@ pub const ARENA_MODE: u32 = 1;
 const LEGACY_MODE: u32 = 2;
 /// The start screen's view of the chosen body: it stands on open ground and the
 /// eye goes round it.
-pub const LOCKER_MODE: u32 = 3;
+pub const LOCKER_MODE: u32 = 4;
 /// Where the locker's eye starts from the body's centre, metres: in front of it,
 /// a little above. The body faces south there, into the sun. And how fast the eye
 /// goes round, radians a second.
 const LOCKER_EYE: Vec3 = Vec3::new(0.0, 0.12, 1.75);
 const LOCKER_TURN: f32 = 0.5;
+/// Neon Rain: the market street and its roofs, in `city.rs`.
+pub const CITY_MODE: u32 = 3;
 
 #[derive(Default, Component)]
 pub struct Player;
@@ -94,6 +98,8 @@ impl Game for ExactBeatEmUp {
     const ID: &'static str = "exact-beat-em-up";
     const HZ: u32 = 120;
     const ASSETS: &'static [&'static str] = &stickman::BODIES;
+    /// The city's models and its sky.
+    const STREAMED: &'static [&'static str] = city::MODELS;
     type Args = Options;
 
     fn validate(args: &Options) -> Result<(), String> {
@@ -120,65 +126,55 @@ impl Game for ExactBeatEmUp {
         camera::register(w);
         w.register_resource::<TouchStick>();
         debug::register(w);
+        w.register_resource::<city::CityState>();
     }
 
     fn setup(w: &mut World, args: &Options) {
         w.reseed(args.seed);
         w.insert_resource(TouchStick::default());
         w.insert_resource(debug::Stick::default());
-        let sky = Color::hex("#9bb8c7");
-        w.insert_resource(Environment {
-            background: Some(sky),
-            fog: Some(Fog {
-                color: Some(sky),
-                ..Fog::new(0.018, 0.08)
-            }),
-            ..Environment::default()
-        });
         physics::register(w);
         w.resource_mut::<physics::Physics>().gravity = Vec3::new(0.0, -body::GRAVITY, 0.0);
-        let ground = Mesh::plane(PARK * 2.0, PARK * 2.0);
-        w.spawn_named(
-            "platform",
-            (
-                Transform::default(),
-                // A metre of ground under the surface. The plane's own collider is a
-                // 1 cm slab, which the capsule dips through on its first step.
-                Collider {
-                    shape: Shape::Box {
-                        half: Vec3::new(PARK, 1.0, PARK),
-                    },
-                    offset: Vec3::new(0.0, -1.0, 0.0),
-                    layer: park::SOLID,
-                    ..Collider::default()
-                },
-                ground,
-                Material::grid(Color::hex("#365466"), 1.0),
-            ),
-        );
-        // Unseen walls keep every body in the park.
-        for (name, x, z) in [
-            ("wall-east", 1.0, 0.0),
-            ("wall-west", -1.0, 0.0),
-            ("wall-south", 0.0, 1.0),
-            ("wall-north", 0.0, -1.0),
-        ] {
-            let across = Vec3::new(z, 0.0, x).abs();
+        if args.mode == CITY_MODE {
+            city::setup(w);
+        } else {
+            let sky = Color::hex("#9bb8c7");
+            w.insert_resource(Environment {
+                background: Some(sky),
+                fog: Some(Fog {
+                    color: Some(sky),
+                    ..Fog::new(0.018, 0.08)
+                }),
+                ..Environment::default()
+            });
+            let ground = Mesh::plane(PARK * 2.0, PARK * 2.0);
             w.spawn_named(
-                name,
+                "platform",
                 (
-                    Transform::at(x * (PARK + 0.5), 20.0, z * (PARK + 0.5)),
+                    Transform::default(),
                     Collider {
-                        shape: Shape::Box {
-                            half: across * PARK + Vec3::new(0.5, 20.0, 0.5),
-                        },
+                        shape: Shape::Box { half: Vec3::new(PARK, 1.0, PARK) },
+                        offset: Vec3::new(0.0, -1.0, 0.0),
+                        layer: park::SOLID,
                         ..Collider::default()
                     },
+                    ground,
+                    Material::grid(Color::hex("#365466"), 1.0),
                 ),
             );
+            for (name, x, z) in [("wall-east", 1.0, 0.0), ("wall-west", -1.0, 0.0), ("wall-south", 0.0, 1.0), ("wall-north", 0.0, -1.0)] {
+                let across = Vec3::new(z, 0.0, x).abs();
+                w.spawn_named(
+                    name,
+                    (
+                        Transform::at(x * (PARK + 0.5), 20.0, z * (PARK + 0.5)),
+                        Collider { shape: Shape::Box { half: across * PARK + Vec3::new(0.5, 20.0, 0.5) }, ..Collider::default() },
+                    ),
+                );
+            }
         }
 
-        if args.mode != ARENA_MODE && args.mode != LOCKER_MODE {
+        if args.mode != ARENA_MODE && args.mode != LOCKER_MODE && args.mode != CITY_MODE {
             park::setup(w);
         }
         if args.mode == RACE_MODE {
@@ -203,10 +199,10 @@ impl Game for ExactBeatEmUp {
         } else {
             std::f32::consts::PI
         };
-        let player_start = if args.mode == RACE_MODE {
-            race::start_position(args.race as u8)
-        } else {
-            Vec3::ZERO
+        let player_start = match args.mode {
+            RACE_MODE => race::start_position(args.race as u8),
+            CITY_MODE => city::START,
+            _ => Vec3::ZERO,
         };
         let player = w.spawn_named(
             "player",
@@ -254,13 +250,15 @@ impl Game for ExactBeatEmUp {
             camera::set_offset(w, LOCKER_EYE);
             camera::present(w, body::Motion::default());
         }
-        w.spawn_named(
-            "sun",
-            (
-                Transform::at(6.0, 11.0, 8.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
-                DirectionalLight::default(),
-            ),
-        );
+        if args.mode != CITY_MODE {
+            w.spawn_named(
+                "sun",
+                (
+                    Transform::at(6.0, 11.0, 8.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+                    DirectionalLight::default(),
+                ),
+            );
+        }
     }
 
     fn paused(args: &Options) -> bool {
@@ -283,6 +281,7 @@ impl Game for ExactBeatEmUp {
                 let turn = LOCKER_TURN * w.tick() as f32 * w.dt();
                 camera::set_offset(w, Quat::from_rotation_y(turn) * LOCKER_EYE);
             }
+            CITY_MODE => {}
             _ => park::tick(w),
         }
         let motion = body::step(w, input);
@@ -293,6 +292,9 @@ impl Game for ExactBeatEmUp {
         camera::present(w, motion);
         if args.mode == RACE_MODE {
             race::tick(w);
+        }
+        if args.mode == CITY_MODE {
+            city::tick(w);
         }
     }
 }

@@ -37,10 +37,11 @@ test "A finger that slides onto Sprint from Jump holds it until it lifts"
   expect state lent == false
   expect state under == ""
 
-test "The title offers three races and a holdout"
+test "The title offers three races, a holdout and the city"
   expect tree has "race-switchback"
   expect tree has "race-helix"
   expect tree has "arena"
+  expect tree has "city"
 
 test "The pause menu can switch between every level"
   tap "play"
@@ -49,6 +50,7 @@ test "The pause menu can switch between every level"
   expect tree has "race-switchback"
   expect tree has "race-helix"
   expect tree has "arena-holdout"
+  expect tree has "city-neon"
 
 test "The holdout opens with combat HUD"
   tap "arena"
@@ -66,3 +68,9 @@ test "The start screen shows the chosen runner and takes it into the level"
   tap "play"
   expect tree has "world"
   expect tree missing "locker"
+
+
+test "Neon Rain opens with its first step"
+  tap "city"
+  clock +100
+  expect tree has "city-hud"
