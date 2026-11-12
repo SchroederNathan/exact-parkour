@@ -296,8 +296,16 @@ pub fn present(w: &mut World, motion: Motion) {
 /// centre, looking at it. `Vec3::ZERO`, or a drag on the scene, returns to the rig.
 /// Movement stays relative to this view.
 pub fn set_offset(w: &mut World, offset: Vec3) {
+    look_at(w, offset, 0.0);
+}
+
+/// `set_offset`, with the point that the eye looks at `lift` metres above the
+/// body's centre: `-0.85` is the feet and `0.7` the head. The four-number
+/// `camera` command.
+pub fn look_at(w: &mut World, offset: Vec3, lift: f32) {
     let mut rig = w.resource_mut::<Rig>();
     rig.cut = true;
+    rig.lift = lift;
     if offset == Vec3::ZERO {
         rig.inspect = None;
     } else {
@@ -336,8 +344,10 @@ struct Rig {
     viewport: Vec2,
     /// The next `present` places the rig instead of easing it.
     cut: bool,
-    /// The debug command's fixed offset, when it is on.
+    /// The debug command's fixed offset, when it is on, and how far above the
+    /// body's centre it looks, m.
     inspect: Option<Vec3>,
+    lift: f32,
 }
 
 /// What `present` writes to the camera entity.
@@ -381,7 +391,7 @@ impl Rig {
             );
             return Shot {
                 pose: Transform {
-                    position: subject.centre + offset,
+                    position: subject.centre + Vec3::Y * self.lift + offset,
                     rotation: basis.rotation(),
                     ..Transform::default()
                 },

@@ -133,3 +133,73 @@ fn the_locker_keeps_the_body_in_place_and_takes_the_eye_round_it() {
     let reach = |eye: Vec3| (eye - stood).length();
     assert!((reach(round) - reach(eye)).abs() < 0.05, "the eye came closer or went away");
 }
+
+// How much of vertex `vertex` of `mesh` follows the joint numbered `joint`.
+fn follows(mesh: &exact_game::asset::MeshData, vertex: usize, joint: usize) -> f32 {
+    (0..4)
+        .filter(|slot| mesh.joints[vertex * 4 + slot] as usize == joint)
+        .map(|slot| mesh.weights[vertex * 4 + slot])
+        .sum()
+}
+
+#[test]
+fn a_foot_is_one_piece_and_the_neck_turns_about_its_own_joint() {
+    let game = start(0);
+    let rig = stickman::rig(body::HEIGHT);
+    let joint = |name: &str| rig.bones().iter().position(|bone| bone.name == name).unwrap();
+    for name in stickman::BODIES {
+        let model = stickman::dressed(&rig, game.world().model(name).unwrap()).unwrap();
+        let mesh = &model.meshes[0];
+        let (mut sole, mut neck, mut column) = (0, 0.0, 0);
+        for vertex in 0..mesh.positions.len() / 3 {
+            let at = Vec3::from_slice(&mesh.positions[vertex * 3..]);
+            // Under the ankle every vertex follows the foot, the heel too. A heel
+            // that the shin holds comes apart from the foot when the foot turns.
+            if at.y < 0.05 {
+                let foot = joint(if at.x > 0.0 { "foot_l" } else { "foot_r" });
+                assert!(
+                    follows(mesh, vertex, foot) > 0.95,
+                    "{name}: a vertex of the sole at {at} follows the foot by {}",
+                    follows(mesh, vertex, foot)
+                );
+                sole += 1;
+            }
+            // The column of the neck, under the jaw, follows the neck and not the
+            // head: the head turns about a joint that is 20 cm higher.
+            if at.y > 1.5 && at.y < 1.55 && at.x.abs() < 0.05 && at.z.abs() < 0.05 {
+                neck += follows(mesh, vertex, joint("neck"));
+                column += 1;
+            }
+        }
+        assert!(sole > 100, "{name}: {sole} vertices in the soles");
+        assert!(column > 0 && neck / column as f32 > 0.6, "{name}: the neck follows its joint by {}", neck / column as f32);
+    }
+}
+
+#[test]
+fn a_stand_is_the_same_on_both_sides_and_the_hands_are_by_the_thighs() {
+    use exact_game::Quat;
+    let rig = stickman::rig(body::HEIGHT);
+    let joint = |name: &str| rig.bones().iter().position(|bone| bone.name == name).unwrap();
+    for character in 0..=stickman::BODIES.len() as u32 {
+        let mut game = start(character);
+        game.run(3000.0);
+        let pose = game.world().get::<Pose>("stickman").unwrap().local.clone();
+        let turn = |name: &str| Quat::from_slice(&pose[joint(name) * 10 + 3..joint(name) * 10 + 7]);
+        for part in ["upper_arm", "forearm", "hand", "thigh", "shin", "foot"] {
+            let (left, right) = (turn(&format!("{part}_l")), turn(&format!("{part}_r")));
+            // The same turn on the other side of the body.
+            let mirrored = Quat::from_xyzw(right.x, -right.y, -right.z, right.w);
+            assert!(
+                left.angle_between(mirrored) < 1e-3,
+                "character {character}: {part} is at {left} on the left and {right} on the right"
+            );
+        }
+        if character > 0 {
+            let wrist = exact_beat_em_up_logic::hold::joint(game.world(), "hand_l");
+            let hips = exact_beat_em_up_logic::hold::joint(game.world(), "hips");
+            let aside = Vec3::new(wrist.x - hips.x, 0.0, wrist.z - hips.z).length();
+            assert!((0.18..0.25).contains(&aside), "character {character}: the wrist is {aside} m from the middle");
+        }
+    }
+}

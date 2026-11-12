@@ -857,7 +857,8 @@ fn kneel(rig: &Rig) -> Clip {
     ];
     // The left knee goes lower than the right: a kneel, not a squat. The arms go
     // down with the drop, the left a moment before the right, and are thrown
-    // forward as the body comes up.
+    // forward as the body comes up. Both are back at rest when the clip ends: the
+    // layer stays at its end, so what an arm kept there it would keep in every pose.
     for (side, away, deep, late) in [("l", 1.0, 1.05, 0.0), ("r", -1.0, 0.95, 0.03)] {
         let bone = |name: &str| node(rig, &format!("{name}_{side}"));
         let bend = BEND * deep;
@@ -865,11 +866,11 @@ fn kneel(rig: &Rig) -> Clip {
         tracks.push(rotation(bone("shin"), &times, move |t| x(2.0 * bend * give(t))));
         tracks.push(rotation(bone("foot"), &times, move |t| x(-bend * give(t))));
         tracks.push(rotation(bone("upper_arm"), &times, move |t| {
-            let u = ((t - late) / KNEEL_SECONDS).max(0.0);
+            let u = ((t - late) / (KNEEL_SECONDS - late)).max(0.0);
             out(away, 0.3 * give(t), swing(u, DEEP))
         }));
         tracks.push(rotation(bone("forearm"), &times, move |t| {
-            let u = ((t - late) / KNEEL_SECONDS).max(0.0);
+            let u = ((t - late) / (KNEEL_SECONDS - late)).max(0.0);
             x(-0.25 * give(t) - 0.5 * swing(u, DEEP).max(0.0))
         }));
     }
@@ -1057,6 +1058,28 @@ pub fn dressed(rig: &Rig, body: &Model) -> Result<Model, String> {
         };
     }
     let mut model = bare(rig);
+    // The mannequin's stand holds its arms off its narrow trunk. A body is wider:
+    // its arms hang beside it, with the elbows under the shoulders, the forearms
+    // a little out past the hips and the hands by the thighs.
+    let stand = model
+        .clips
+        .iter_mut()
+        .find(|clip| clip.name == "stand")
+        .expect("the rig has a stand");
+    *stand = held(
+        rig,
+        "stand",
+        PACES[0].period(),
+        &[
+            ("hips", Quat::IDENTITY),
+            ("upper_arm_l", out(1.0, -0.06, -0.04)),
+            ("upper_arm_r", out(-1.0, -0.06, -0.04)),
+            ("forearm_l", Quat::from_rotation_z(0.06) * x(-0.22)),
+            ("forearm_r", Quat::from_rotation_z(-0.06) * x(-0.22)),
+            ("hand_l", x(-0.1)),
+            ("hand_r", x(-0.1)),
+        ],
+    );
     model.bounds = mesh.bounds;
     model.meshes = vec![mesh];
     model.materials = body.materials.clone();

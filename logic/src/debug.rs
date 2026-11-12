@@ -5,7 +5,9 @@
 //! - `goto <x> <y> <z> <yaw degrees>`: stand the body with its feet there, facing
 //!   that way; zero faces south (+Z).
 //! - `camera <x> <y> <z>`: hold the camera that far from the body's centre, looking
-//!   at it. `camera 0 0 0`, or a drag on the scene, gives it back to the rig.
+//!   at it. `camera 0 0 0`, or a drag on the scene, gives it back to the rig. A
+//!   fourth number raises the point it looks at: `camera 0.6 0.1 -0.6 -0.8` is a
+//!   close view of the feet.
 //! - `roller <kind> <speed>`: send roller `kind` at the body from behind its back.
 use crate::body::{self, Parkour};
 use crate::park;
@@ -45,6 +47,9 @@ pub fn commands(w: &mut World, input: &Input) {
             }
             ("camera", &[x, y, z]) => {
                 crate::camera::set_offset(w, Vec3::new(x, y, z));
+            }
+            ("camera", &[x, y, z, lift]) => {
+                crate::camera::look_at(w, Vec3::new(x, y, z), lift);
             }
             ("roller", &[kind, speed]) => {
                 let (at, yaw) = {

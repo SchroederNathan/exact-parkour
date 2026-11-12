@@ -75,6 +75,33 @@ for _meshy, _side in (("Left", "l"), ("Right", "r")):
 
 # The middle of the mannequin's foot, front to back.
 FOOT_MIDDLE = 0.052
+# How far the toes point out from straight ahead, radians.
+TOE_OUT = math.radians(6.0)
+# The heights between which a vertex goes from the foot's to the shin's, metres.
+ANKLE = (0.065, 0.15)
+# How far the collar bone comes down from the T-pose, radians.
+SHRUG = math.radians(8.0)
+# How far a body's own shoulders may be nearer the middle and lower than the
+# game's joints, metres.
+NARROWER = 0.03
+LOWER = 0.02
+# The knuckles' place along the hand, the turn of a fingertip toward the palm
+# (radians), and how far the fingers close toward the middle one.
+KNUCKLES = 0.45
+CURL = math.radians(65.0)
+CLOSE = 0.25
+# Where the collar bone hands a vertex to the arm: from this far before the
+# shoulder joint to this far past it, along the arm, metres.
+SHOULDER = (-0.03, 0.09)
+# The height of the jaw's line at the middle of the neck, metres, and its fall
+# toward the front for each metre.
+JAW = 1.60
+JAW_SLOPE = 0.3
+
+
+def smoothstep(low, high, x):
+    t = np.clip((x - low) / (high - low), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
 
 
 def unit(v):
@@ -145,16 +172,19 @@ def blend_rigid(points, weights, turns, moves):
     return multiply(multiply(q, p), conjugate(q))[:, 1:] + move
 
 
+def claim(blocks, block, name):
+    """Give `block` the name, and take it from a block that an earlier run left."""
+    other = blocks.get(name)
+    if other is not None and other != block:
+        other.name = name + ".old"
+    block.name = name
+
+
 def fit(source, out, name):
     scene = bpy.data.scenes.get(name) or bpy.data.scenes.new(name)
     bpy.context.window.scene = scene
     for o in list(scene.objects):
         bpy.data.objects.remove(o, do_unlink=True)
-    # What an earlier run of this body left, so that the names stay the same.
-    for blocks in (bpy.data.meshes, bpy.data.armatures, bpy.data.materials, bpy.data.images):
-        for block in list(blocks):
-            if block.name in (name, name + "_rig") and block.users == 0:
-                blocks.remove(block)
     bpy.ops.import_scene.gltf(filepath=source, merge_vertices=True)
     armature = next(o for o in scene.objects if o.type == "ARMATURE")
     body = next(o for o in scene.objects if o.type == "MESH" and o.vertex_groups)
@@ -172,57 +202,170 @@ def fit(source, out, name):
     bones = {b.name: np.array(armature.matrix_world @ b.head_local) for b in armature.data.bones}
     meshy = dict(zip(bones, game(np.array(list(bones.values())))))
 
-    # The weights, a column for each game joint.
-    column = {n: i for i, n in enumerate(NAMES)}
-    group = {g.index: column[FROM_MESHY[g.name]] for g in body.vertex_groups}
-    weights = np.zeros((count, len(NAMES)))
+    # Meshy's weights, a column for each of its joints.
+    parts = [g.name for g in body.vertex_groups]
+    part = {n: i for i, n in enumerate(parts)}
+    raw = np.zeros((count, len(parts)))
     for v in mesh.vertices:
         for g in v.groups:
-            weights[v.index, group[g.group]] += g.weight
-    loose = int((weights.sum(axis=1) < 1e-6).sum())
+            raw[v.index, g.group] += g.weight
+    loose = int((raw.sum(axis=1) < 1e-6).sum())
     if loose:
         raise ValueError(f"{loose} vertices have no weight")
-    weights /= weights.sum(axis=1, keepdims=True)
+    raw /= raw.sum(axis=1, keepdims=True)
 
-    # To the game's height, with the soles on the ground and the feet where the
-    # mannequin's are, front to back.
+    def share(*names):
+        return raw[:, [part[n] for n in names]].sum(axis=1)
+
+    # To the game's height, with the soles on the ground.
     scale = HEIGHT / (at[:, 1].max() - at[:, 1].min())
-    feet = weights[:, column["foot_l"]] + weights[:, column["foot_r"]] > 0.5
-    middle = (at[feet, 2].max() + at[feet, 2].min()) / 2.0
-    origin = np.array([0.0, at[:, 1].min(), middle - FOOT_MIDDLE / scale])
+    origin = np.array([0.0, at[:, 1].min(), 0.0])
     at = (at - origin) * scale
     meshy = {n: (p - origin) * scale for n, p in meshy.items()}
     print(f"{name}: scale {scale:.4f}, {count} vertices")
 
-    turns = [np.eye(3) for _ in NAMES]
-    moves = [np.zeros(3) for _ in NAMES]
-    stretched = at.copy()
-    for meshy_side, side in (("Left", "l"), ("Right", "r")):
-        upper, fore, hand = (f"{part}_{side}" for part in ("upper_arm", "forearm", "hand"))
-        shoulder, elbow, wrist = (meshy[f"{meshy_side}{j}"] for j in ("Arm", "ForeArm", "Hand"))
+    # Everything from here to the swing happens in the T-pose.
+    shaped = at.copy()
+    sides = (("Left", "l", 1.0), ("Right", "r", -1.0))
+    for meshy_side, side, outward in sides:
+        # The legs stand under the game's hips: each leaning leg is made upright,
+        # from the hip down, so the ankle is on the game's line. The foot goes
+        # with the ankle.
+        leg = share(f"{meshy_side}UpLeg", f"{meshy_side}Leg", f"{meshy_side}Foot", f"{meshy_side}ToeBase")
+        hip, ankle = meshy[f"{meshy_side}UpLeg"], meshy[f"{meshy_side}Foot"].copy()
+        down = np.clip((hip[1] - shaped[:, 1]) / (hip[1] - ankle[1]), 0.0, 1.0)
+        lean = AT[f"foot_{side}"][0] - ankle[0]
+        shaped[:, 0] += leg * down * lean
+        ankle[0] += lean
+        # The feet point ahead, with a few degrees of toe-out. The foot turns about
+        # the ankle, and the turn fades out up the shin. The foot's line is from
+        # the middle of the heel to the middle of the toes.
+        sole = shaped[(leg > 0.5) & (shaped[:, 1] < 0.05)][:, [0, 2]]
+        long = np.linalg.svd(sole - sole.mean(axis=0), full_matrices=False)[2][0]
+        long = long if long[1] > 0 else -long
+        far = (sole - sole.mean(axis=0)) @ long
+        line = sole[far > np.quantile(far, 0.85)].mean(axis=0) - sole[far < np.quantile(far, 0.15)].mean(axis=0)
+        toes_out = outward * math.atan2(line[0], line[1])
+        by_height = 1.0 - smoothstep(ANKLE[0], ANKLE[1], shaped[:, 1])
+        turn = -outward * (toes_out - TOE_OUT) * by_height * (leg > 0.5)
+        x, z = shaped[:, 0] - ankle[0], shaped[:, 2] - ankle[2]
+        shaped[:, 0] = ankle[0] + x * np.cos(turn) + z * np.sin(turn)
+        shaped[:, 2] = ankle[2] - x * np.sin(turn) + z * np.cos(turn)
+        print(
+            f"  {side} leg: ankle moved {lean * 100:.1f} cm across, toes were {math.degrees(toes_out):.1f} degrees out"
+            f" (long axis {math.degrees(outward * math.atan2(long[0], long[1])):.1f})"
+        )
+
+    # The feet where the mannequin's are, front to back, and the body with them.
+    feet = share("LeftFoot", "LeftToeBase", "RightFoot", "RightToeBase") > 0.5
+    forward = np.array([0.0, 0.0, (shaped[feet, 2].max() + shaped[feet, 2].min()) / 2.0 - FOOT_MIDDLE])
+    shaped -= forward
+    at = at - forward
+    meshy = {n: p - forward for n, p in meshy.items()}
+
+    turns = [np.eye(3) for _ in parts]
+    moves = [np.zeros(3) for _ in parts]
+    hangs = {}
+    for meshy_side, side, outward in sides:
+        upper, fore, hand = (f"{limb}_{side}" for limb in ("upper_arm", "forearm", "hand"))
+        m_upper, m_fore, m_hand = (f"{meshy_side}{j}" for j in ("Arm", "ForeArm", "Hand"))
+        collar, shoulder, elbow, wrist = (meshy[f"{meshy_side}{j}"] for j in ("Shoulder", "Arm", "ForeArm", "Hand"))
         along = [unit(elbow - shoulder), unit(wrist - elbow)]
         length = [np.linalg.norm(AT[fore] - AT[upper]), np.linalg.norm(AT[hand] - AT[fore])]
         by = [length[0] / np.linalg.norm(elbow - shoulder), length[1] / np.linalg.norm(wrist - elbow)]
         print(f"  {side} arm: upper x{by[0]:.3f}, fore x{by[1]:.3f}")
-        # In the T-pose: each part longer along its own line, the next part moved out with it.
+        # Meshy's step from the collar bone to the arm can be sharp, and the swing
+        # then leaves a corner on the shoulder. The two share what they had between
+        # them by how far along the arm a vertex is. Hair that lies on the shoulder
+        # stays with the head.
+        m_collar = f"{meshy_side}Shoulder"
+        between = raw[:, part[m_collar]] + raw[:, part[m_upper]]
+        to_arm = smoothstep(SHOULDER[0], SHOULDER[1], (at - shoulder) @ along[0])
+        body_part = share("Head", "neck", "head_end", "headfront") < 0.3
+        raw[body_part, part[m_upper]] = (between * to_arm)[body_part]
+        raw[body_part, part[m_collar]] = (between * (1.0 - to_arm))[body_part]
+
+        # Each part of the arm longer along its own line, the next part moved out with it.
         new_elbow = shoulder + along[0] * length[0]
         new_wrist = new_elbow + along[1] * length[1]
-        parts = [
-            (upper, lambda p: shoulder + (p - shoulder) @ stretch(along[0], by[0]).T),
-            (fore, lambda p: new_elbow + (p - elbow) @ stretch(along[1], by[1]).T),
-            (hand, lambda p: new_wrist + (p - wrist)),
+        moved = [
+            (m_upper, lambda p: shoulder + (p - shoulder) @ stretch(along[0], by[0]).T),
+            (m_fore, lambda p: new_elbow + (p - elbow) @ stretch(along[1], by[1]).T),
+            (m_hand, lambda p: new_wrist + (p - wrist)),
         ]
-        for joint, moved in parts:
-            w = weights[:, column[joint]][:, None]
-            stretched += w * (moved(at) - at)
-        # Then down to the rest pose: the upper arm about the shoulder, the
-        # forearm and the hand with it and onto the game's forearm line.
+        shaped += sum(share(joint)[:, None] * (to(at) - at) for joint, to in moved)
+
+        # A hand at rest: the fingers curl toward the palm and close a little. The
+        # palm faces down in the T-pose, so the fingers go round a line across the
+        # hand, under the knuckles.
+        grip = share(m_hand)
+        reach = (shaped - new_wrist) @ along[1]
+        tip = reach[grip > 0.5].max()
+        knuckles = KNUCKLES * tip
+        across = unit(np.cross(along[1], np.array([0.0, 1.0, 0.0])))
+        back = np.cross(across, along[1])
+        fingers = (grip > 0.5) & (reach > knuckles)
+        middle = shaped[fingers].mean(axis=0)
+        past = np.clip(reach - knuckles, 0.0, None)
+        angle = CURL * past / (tip - knuckles)
+        radius = (tip - knuckles) / CURL + (shaped - middle) @ back
+        curled = (
+            shaped
+            + np.outer(radius * np.sin(angle) - past, along[1])
+            + np.outer(radius * (np.cos(angle) - 1.0), back)
+            - np.outer(CLOSE * past / (tip - knuckles) * ((shaped - middle) @ across), across)
+        )
+        shaped += grip[:, None] * (curled - shaped)
+
+        # The collar bone comes down with the arm, which lowers the top of the
+        # shoulder. Then the arm goes down to the rest pose: the upper arm about
+        # the shoulder, the forearm and the hand with it and onto the game's line.
+        drop = turn_onto(np.array([1.0, 0.0, 0.0]), np.array([math.cos(SHRUG), -outward * math.sin(SHRUG), 0.0]))
         swing = turn_onto(along[0], AT[fore] - AT[upper])
         bend = turn_onto(swing @ along[1], AT[hand] - AT[fore]) @ swing
-        for joint, turn, pivot in ((upper, swing, shoulder), (fore, bend, new_elbow), (hand, bend, new_wrist)):
-            turns[column[joint]] = turn
-            moves[column[joint]] = AT[joint] - turn @ pivot
-    posed = blend_rigid(stretched, weights, turns, moves)
+        turns[part[m_collar]] = drop
+        moves[part[m_collar]] = collar - drop @ collar
+        # A body keeps its own shoulders when they are a little narrower or lower
+        # than the game's: the whole arm hangs that much nearer or lower than its
+        # joints. An arm turns mostly about a line across the body, and a joint
+        # that is off along that line turns the arm the same.
+        own = collar + drop @ (shoulder - collar) - AT[upper]
+        own = np.array([outward * np.clip(outward * own[0], -NARROWER, 0.0), np.clip(own[1], -LOWER, 0.0), 0.0])
+        print(f"  {side} shoulder: {-outward * own[0] * 100:.1f} cm nearer and {-own[1] * 100:.1f} cm lower than the joint")
+        for joint, to, turn, pivot in ((m_upper, upper, swing, shoulder), (m_fore, fore, bend, new_elbow), (m_hand, hand, bend, new_wrist)):
+            turns[part[joint]] = turn
+            moves[part[joint]] = AT[to] + own - turn @ pivot
+        hangs[side] = own
+
+    posed = blend_rigid(shaped, raw, turns, moves)
+
+    # The game's weights: each Meshy joint's go to the game joint that moves that part.
+    column = {n: i for i, n in enumerate(NAMES)}
+    weights = np.zeros((count, len(NAMES)))
+    for joint, index in part.items():
+        weights[:, column[FROM_MESHY[joint]]] += raw[:, index]
+
+    # Then each hinge is put where the game's joint is. Two neighbours share what
+    # they had between them by how far a vertex is past the joint.
+    def hinge(before, after, past, width):
+        total = weights[:, column[before]] + weights[:, column[after]]
+        to_after = smoothstep(-width, width, past)
+        weights[:, column[after]] = total * to_after
+        weights[:, column[before]] = total * (1.0 - to_after)
+
+    for side in ("l", "r"):
+        thigh, shin, foot = (f"{limb}_{side}" for limb in ("thigh", "shin", "foot"))
+        upper, fore, hand = (f"{limb}_{side}" for limb in ("upper_arm", "forearm", "hand"))
+        hinge(thigh, shin, (posed - AT[shin]) @ unit(AT[shin] - AT[thigh]), 0.06)
+        # All of the foot follows the foot, the heel too. It gives way to the shin
+        # over the ankle.
+        hinge(shin, foot, (ANKLE[0] + ANKLE[1]) / 2.0 - posed[:, 1], (ANKLE[1] - ANKLE[0]) / 2.0)
+        hinge(upper, fore, (posed - AT[fore] - hangs[side]) @ unit(AT[fore] - AT[upper]), 0.05)
+        hinge(fore, hand, (posed - AT[hand] - hangs[side]) @ unit(AT[hand] - AT[fore]), 0.03)
+    # Meshy gives the whole neck to the head. The head is what is above the line
+    # of the jaw, which is lower at the chin than at the back of the skull.
+    jaw = unit(np.array([0.0, 1.0, JAW_SLOPE]))
+    hinge("neck", "head", (posed - np.array([0.0, JAW, 0.0])) @ jaw, 0.025)
 
     # At most four joints for a vertex, which is what the engine skins with.
     order = np.argsort(-weights, axis=1)[:, :4]
@@ -236,6 +379,7 @@ def fit(source, out, name):
         return (float(p[0]), float(-p[2]), float(p[1]))
 
     data = bpy.data.armatures.new(name + "_rig")
+    claim(bpy.data.armatures, data, name + "_rig")
     rig = bpy.data.objects.new(name + "_rig", data)
     scene.collection.objects.link(rig)
     bpy.context.view_layer.objects.active = rig
@@ -255,7 +399,7 @@ def fit(source, out, name):
     fitted = bpy.data.objects.new(name, mesh.copy())
     scene.collection.objects.link(fitted)
     new = fitted.data
-    new.name = name
+    claim(bpy.data.meshes, new, name)
     new.vertices.foreach_set("co", np.array([blender(p) for p in posed]).ravel())
     for attribute in ("custom_normal", "sharp_edge", "sharp_face"):
         if attribute in new.attributes:
@@ -275,14 +419,14 @@ def fit(source, out, name):
     fitted.modifiers.new("rig", "ARMATURE").object = rig
 
     for material in new.materials:
-        material.name = name
+        claim(bpy.data.materials, material, name)
         material.use_backface_culling = True
         for node in material.node_tree.nodes:
             if node.type == "BSDF_PRINCIPLED":
                 node.inputs["Metallic"].default_value = 0.0
                 node.inputs["Roughness"].default_value = 0.8
             if node.type == "TEX_IMAGE" and node.image:
-                node.image.name = name
+                claim(bpy.data.images, node.image, name)
                 if max(node.image.size) > TEXTURE:
                     node.image.scale(TEXTURE, TEXTURE)
                     node.image.pack()
