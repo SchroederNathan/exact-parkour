@@ -1,4 +1,5 @@
 test "Play opens the platform"
+  prefer pointer fine
   expect tree has "play"
   tap "play"
   expect tree has "world"

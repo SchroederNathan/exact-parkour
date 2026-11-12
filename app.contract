@@ -31,6 +31,8 @@ component ExactBeatEmUp
   resource hud = exactSurface("world") as shape Hud
   derive touch = viewport.pointer == "coarse"
   derive narrow = viewport.width < 600
+  derive lockerWidth = narrow ? 150 : 210
+  derive lockerHeight = narrow ? 188 : 264
   derive stickX = paused ? 0 : hud.move_x
   derive stickY = paused ? 0 : hud.move_y
   derive stickActive = stickX * stickX + stickY * stickY > 0.0001
@@ -191,9 +193,9 @@ component ExactBeatEmUp
             button action="jump" id="jump" pointerdown=touchDown pointermove=glide pointerup=touchUp touch-action="none" appearance="none" testId="jump" position="absolute" right="calc(max(env(safe-area-inset-left), env(safe-area-inset-right)) + 24px)" bottom=jumpBottom width=96 height=96 box-sizing="border-box" padding=0 border-radius=48 background-color="#244a60dd" border="1px solid #d9edf5aa" color="#ffffff" display="flex" align-items="center" justify-content="center" aria-label="Jump"
               text "Jump" font-size=16 font-weight=700 pointer-events="none"
       else
-        row width="100%" height="100%" box-sizing="border-box" padding=24 align-items="center" justify-content="center" gap=28 flex-wrap="wrap" overflow="auto"
+        row width="100%" height="100%" box-sizing="border-box" padding-left=24 padding-right=24 padding-top="calc(env(safe-area-inset-top) + 16px)" padding-bottom="calc(env(safe-area-inset-bottom) + 16px)" align-items="center" justify-content="center" gap=(narrow ? 16 : 28) flex-wrap="wrap" overflow="auto"
           column align-items="center" gap=10
-            canvas surface=world(seed=3, character=character, mode=4, race=0, paused=false, restart=false) testId="locker" aria-label=(character == 1 ? "Ash, turning" : "Ember, turning") width=210 height=264 border-radius=16 overflow="hidden" pointer-events="none"
+            canvas surface=world(seed=3, character=character, mode=4, race=0, paused=false, restart=false) testId="locker" aria-label=(character == 1 ? "Ash, turning" : "Ember, turning") width=lockerWidth height=lockerHeight border-radius=16 overflow="hidden" pointer-events="none"
             text "Choose a runner" font-size=14 font-weight=700 color="#b8c8ce"
             row role="radiogroup" aria-label="Runner" gap=8
               button role="radio" appearance="none" aria-checked=(character == 1) press=pickRunnerA testId="runner-a" aria-label="Ash" min-width=88 padding=10 border-radius=12 background-color=(character == 1 ? "#2b5364" : "#101822") border=(character == 1 ? "2px solid #d9edf5" : "2px solid #3a5566") color="#ffffff"
