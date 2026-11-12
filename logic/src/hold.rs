@@ -207,6 +207,74 @@ pub fn shift(w: &mut World, name: &str, by: Vec3) {
     pose.local[slot..slot + 3].copy_from_slice(&moved.to_array());
 }
 
+/// Where the wrist or ankle of each of `limbs` is, and how its hand or foot is
+/// turned, in the body's frame.
+pub fn placed(w: &World, limbs: &[Limb]) -> Vec<(Limb, Vec3, Quat)> {
+    let model = w.model(MODEL).expect("the stick man's model is generated in setup");
+    let pose = w.require::<Pose>("stickman");
+    limbs
+        .iter()
+        .map(|&limb| {
+            let (_, turn, at) = joint_matrix(model, &pose.local, node(model, limb.chain()[2]))
+                .to_scale_rotation_translation();
+            (limb, at, turn)
+        })
+        .collect()
+}
+
+/// Put the wrists and ankles of `placed` back where they were, and their hands
+/// and feet as they were turned, after the trunk has moved `moved` metres: each
+/// limb reaches there from where its shoulder or hip is now, as far as it goes.
+/// Its elbow or knee stays on the side it was on. A knee stays in front, even
+/// when the hips went back past a straight leg. Call after `apply`, which then
+/// knows where every limb is.
+pub fn replace(w: &mut World, placed: &[(Limb, Vec3, Quat)], moved: f32) {
+    let Some(mut local) = w.get::<Pose>("stickman").map(|pose| pose.local.clone()) else {
+        return;
+    };
+    if local.is_empty() {
+        return;
+    }
+    let tips = {
+        let model = w.model(MODEL).expect("the stick man's model is generated in setup");
+        for &(limb, target, turn) in placed {
+            let chain = limb.chain();
+            let [_, middle, tip] = joints(model, &local, limb);
+            if tip != target {
+                let ik = Ik {
+                    chain: chain.map(String::from),
+                    target,
+                    pole: if limb.is_foot() {
+                        middle + Vec3::Z * (2.0 * moved)
+                    } else {
+                        middle
+                    },
+                    weight: 1.0,
+                };
+                solve_ik(model, &mut local, &ik).expect("the limb's chain is in the rig");
+            }
+            let above = joint_matrix(model, &local, node(model, chain[1]))
+                .to_scale_rotation_translation()
+                .1;
+            let slot = node(model, chain[2]) as usize * 10 + 3;
+            let turned = (above.inverse() * turn).normalize();
+            local[slot..slot + 4].copy_from_slice(&turned.to_array());
+        }
+        Limb::ALL.map(|limb| joints(model, &local, limb)[2])
+    };
+    if let Some(mut limbs) = w.get_mut::<Limbs>("stickman") {
+        if limbs.state.len() == ROW * 4 {
+            for (index, at) in tips.into_iter().enumerate() {
+                limbs.state[index * ROW..index * ROW + 3].copy_from_slice(&at.to_array());
+            }
+        }
+    }
+    let mut pose = w.require_mut::<Pose>("stickman");
+    if pose.local != local {
+        pose.local = local;
+    }
+}
+
 // The limb's three joints as they are posed, in the body's frame.
 fn joints(model: &Model, local: &[f32], limb: Limb) -> [Vec3; 3] {
     limb.chain()

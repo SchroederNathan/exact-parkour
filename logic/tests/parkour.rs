@@ -1504,3 +1504,96 @@ fn nothing_shakes_on_a_wall() {
     report("gap-4 to gap-5".into(), worst);
     all_pass(failures, cases);
 }
+
+// How far the drawn body's hips are from its capsule along `way`, metres.
+fn hips_out(game: &Game, way: Vec3) -> f32 {
+    (hold::joint(game.world(), "hips") - centre(game)).dot(way)
+}
+fn tilt(game: &Game) -> Vec3 {
+    game.get::<Parkour>("player").unwrap().tilt
+}
+fn facing(game: &Game) -> Vec3 {
+    game.get::<Transform>("stickman").unwrap().rotation * Vec3::Z
+}
+
+#[test]
+fn a_body_leans_the_way_it_is_pushed_and_stands_up_again() {
+    let mut game = start();
+    let north = -Vec3::Z;
+    place(&mut game, Vec3::new(0.0, 0.0, 22.0), north);
+    game.run(60.0);
+    assert_eq!(tilt(&game), Vec3::ZERO);
+    // From a stand into a sprint the weight goes forward: the hips are ahead of
+    // the capsule, and a foot is on the ground behind them.
+    steer(&mut game, north);
+    game.key_down("ShiftLeft");
+    run(&mut game, 150.0, "start", |_| false);
+    let lean = tilt(&game).dot(north);
+    assert!(lean > 0.2, "the start leans {lean} rad forward");
+    let out = hips_out(&game, north);
+    assert!(out > 0.08, "the hips are {out} m ahead");
+    // At speed the body carries no lean but its gait's.
+    run(&mut game, 1200.0, "sprint", |_| false);
+    let left = tilt(&game).length();
+    assert!(left < 0.01, "{left} rad of lean is left at speed");
+    // Braking, the weight goes back.
+    steer(&mut game, Vec3::ZERO);
+    run(&mut game, 120.0, "brake", |_| false);
+    let lean = tilt(&game).dot(north);
+    assert!(lean < -0.1, "the stop leans {lean} rad forward");
+    let out = hips_out(&game, north);
+    assert!(out < -0.03, "the hips are {out} m ahead");
+    run(&mut game, 800.0, "stand", |_| false);
+    assert_eq!(tilt(&game), Vec3::ZERO);
+}
+
+#[test]
+fn an_about_face_turns_through_the_stop_with_the_weight_toward_the_way_back() {
+    for sprint in [true, false] {
+        let what = format!("about-face, sprint {sprint}");
+        let mut game = start();
+        let north = -Vec3::Z;
+        place(&mut game, Vec3::new(0.0, 0.0, 22.0), north);
+        game.run(60.0);
+        steer(&mut game, north);
+        if sprint {
+            game.key_down("ShiftLeft");
+        }
+        run(&mut game, 1500.0, &what, |_| false);
+        let top = velocity(&game).length();
+        steer(&mut game, Vec3::ZERO);
+        game.run(TICK_MS);
+        steer(&mut game, -north);
+        // To the stop: the body brakes with its weight going back, and is
+        // side-on as it stops.
+        let stopped = run(&mut game, 400.0, &what, |g| velocity(g).dot(north) <= 0.0);
+        assert!(stopped, "{what}: no stop");
+        let side = facing(&game).dot(north);
+        assert!(side.abs() < 0.75, "{what}: at the stop the body faces {side} of the way it came");
+        let lean = tilt(&game).dot(north);
+        // A run stops in half the time of a sprint, and the lean has half the
+        // time to follow.
+        let (most, far) = if sprint { (-0.25, -0.1) } else { (-0.12, -0.04) };
+        assert!(lean < most, "{what}: at the stop the body leans {lean} rad the way it came");
+        let out = hips_out(&game, north);
+        assert!(out < far, "{what}: at the stop the hips are {out} m the way it came");
+        // From the stop: the lean never leaves the way back until the body is
+        // at speed again, so the weight goes straight through the turn.
+        let mut looked = 0.0f32;
+        let mut ticks = 0;
+        while velocity(&game).length() < top - 0.01 {
+            game.run(TICK_MS);
+            check(&game, &what);
+            ticks += 1;
+            assert!(ticks < 60, "{what}: no speed after the turn");
+            assert!(tilt(&game).dot(north) < most, "{what}: the lean left the way back at tick {ticks}");
+            looked = looked.max(game.get::<Parkour>("player").unwrap().look.abs());
+        }
+        assert!(looked > 0.1, "{what}: the head did not lead the turn");
+        run(&mut game, 500.0, &what, |_| false);
+        assert!(facing(&game).dot(north) < -0.99, "{what}: faces {}", facing(&game));
+        // The view still comes round behind the run, which turns the run a little.
+        let left = tilt(&game).length();
+        assert!(left < 0.02, "{what}: {left} rad of lean is left");
+    }
+}

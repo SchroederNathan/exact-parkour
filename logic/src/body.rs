@@ -36,6 +36,32 @@ const AIR_ACCEL: f32 = 9.0;
 /// a quick spin and not a flip.
 const TURN: f32 = 18.0;
 const TURN_MAX: f32 = 14.0;
+/// On its feet the body's turn starts and stops gently: its rate changes by at
+/// most this much, rad/s².
+const SPIN: f32 = 400.0;
+/// On its feet the body faces where its velocity will be when the stick has
+/// pushed it this much further, m/s. An about-face so starts while the body
+/// still brakes, and the body is side-on as it stops.
+const FACE_AHEAD: f32 = 4.5;
+/// How far the body leans when it speeds up as hard as it can, radians, and how
+/// fast the lean follows what pushes it, per second: a spring with no bounce.
+const TILT: f32 = 0.42;
+const BALANCE: f32 = 14.0;
+/// A change of ground speed under this, m/s², is none.
+const STEADY: f32 = 0.5;
+/// Of a lean. How far the hips go toward it, as a share of where a body that
+/// tipped stiff about its feet would have them. How far they sink, metres per
+/// radian. The shares of it that the pelvis, the spine and the chest turn by,
+/// and the share the neck turns back.
+const HIPS_OUT: f32 = 0.5;
+const HIPS_SINK: f32 = 0.25;
+const TRUNK: [f32; 3] = [0.5, 0.3, 0.2];
+const NECK_BACK: f32 = 0.5;
+/// How far the head turns toward a turn that the body has still to make, as a
+/// share of that turn and at most, radians; and how fast it does, per second.
+const LOOK: f32 = 0.5;
+const LOOK_MOST: f32 = 0.5;
+const LOOK_RATE: f32 = 16.0;
 /// A jump still starts this long after the feet left an edge, and a press this
 /// long before they touch down is kept for the landing, seconds.
 const COYOTE: f32 = 0.1;
@@ -413,6 +439,16 @@ pub struct Parkour {
     /// Ground speed a slide left the body with, m/s. While it is more than the
     /// legs run, the body keeps it, and it dies away.
     pub momentum: f32,
+    /// On its feet: how the body leans, as a vector on the ground. It points
+    /// where the weight goes and is as long as the lean's angle, radians.
+    /// `tipping` is how fast it changes, per second.
+    pub tilt: Vec3,
+    pub tipping: Vec3,
+    /// How fast the body turns on its feet, rad/s; to the left is positive.
+    pub spin: f32,
+    /// How far the head is turned toward a turn the body has still to make,
+    /// radians; to the left is positive.
+    pub look: f32,
 }
 
 /// Feet position of a capsule centre.
@@ -450,6 +486,8 @@ struct Controls {
 pub fn step(w: &mut World, input: &Input) -> Motion {
     let dt = w.dt();
     let mut body = w.require::<Parkour>("player").clone();
+    let before = planar(w.require::<CapsuleController>("player").velocity);
+    let stood = matches!(body.action, Action::Ground);
     // A finger that slides from one touch button onto another presses the one it
     // arrives on. The app says so with a message, since the button the finger
     // went down on still holds the touch.
@@ -534,15 +572,76 @@ pub fn step(w: &mut World, input: &Input) -> Motion {
         }
     }
 
+    let velocity = planar(w.require::<CapsuleController>("player").velocity);
+    let on_feet = stood && matches!(body.action, Action::Ground);
+    // On its feet the body leans the way it is pushed: forward as it speeds up,
+    // back as it brakes, into a turn. Through an about-face the push keeps one
+    // way in the world while the body comes round under it, so the lean goes
+    // from the back over one side to the front and the weight never stops.
+    // In any other move the lean it had dies away, twice as fast.
+    if matches!(body.action, Action::Ragdoll | Action::Rise { .. }) {
+        (body.tilt, body.tipping) = (Vec3::ZERO, Vec3::ZERO);
+    } else {
+        let (want, rate) = if on_feet {
+            let push = ((velocity - before) / dt).clamp_length_max(ACCEL);
+            // The capsule's speed is a few ulps off what it was asked for.
+            let push = if push.length() < STEADY { Vec3::ZERO } else { push };
+            (push * (TILT / ACCEL), BALANCE)
+        } else {
+            (Vec3::ZERO, 2.0 * BALANCE)
+        };
+        let pull = (want - body.tilt) * (rate * rate) - body.tipping * (2.0 * rate);
+        body.tipping += pull * dt;
+        body.tilt += body.tipping * dt;
+        if want == Vec3::ZERO && body.tilt.length() < 1e-3 && body.tipping.length() < 1e-2 {
+            (body.tilt, body.tipping) = (Vec3::ZERO, Vec3::ZERO);
+        }
+    }
+
     // Turn toward where the body is going, or where its move points it.
+    let steered = face.is_none() && on_feet;
     let target = face.or_else(|| {
-        let v = planar(w.require::<CapsuleController>("player").velocity);
+        let v = if steered {
+            velocity + controls.wish * FACE_AHEAD
+        } else {
+            velocity
+        };
         (v.length() > 0.02).then(|| math::atan2(v.x, v.z))
     });
+    let mut look = 0.0;
     if let Some(target) = target {
-        let left = wrap_angle(target - body.yaw);
-        let turn = (left.abs() * TURN).min(TURN_MAX) * dt;
-        body.yaw = wrap_angle(body.yaw + left.clamp(-turn, turn));
+        let mut left = wrap_angle(target - body.yaw);
+        if steered {
+            // Straight back is as near by the left as by the right. The body
+            // turns away from the foot that is next on the ground, which is the
+            // one it brakes on: that foot is then on the outside of the turn.
+            if left.abs() > std::f32::consts::PI - 0.05 {
+                let cycle = w.get::<Pose>("stickman").map_or(0.0, |pose| pose.phase);
+                left = left.abs() * air::lead(cycle + 0.15);
+            }
+            let want = (left * TURN).clamp(-TURN_MAX, TURN_MAX);
+            let change = SPIN * dt;
+            body.spin += (want - body.spin).clamp(-change, change);
+            let turn = body.spin * dt;
+            let turn = if turn * left > 0.0 && turn.abs() > left.abs() {
+                left
+            } else {
+                turn
+            };
+            body.yaw = wrap_angle(body.yaw + turn);
+            look = (LOOK * wrap_angle(target - body.yaw)).clamp(-LOOK_MOST, LOOK_MOST);
+        } else {
+            let turn = (left.abs() * TURN).min(TURN_MAX) * dt;
+            body.yaw = wrap_angle(body.yaw + left.clamp(-turn, turn));
+            body.spin = 0.0;
+        }
+    } else {
+        body.spin = 0.0;
+    }
+    // The head goes first into a turn.
+    body.look += (look - body.look) * (1.0 - math::exp(-LOOK_RATE * dt));
+    if look == 0.0 && body.look.abs() < 1e-4 {
+        body.look = 0.0;
     }
     let facing = Quat::from_rotation_y(body.yaw);
     if w.require::<Transform>("stickman").rotation != facing {
@@ -1736,6 +1835,49 @@ fn recline(w: &mut World, slide: &Slide, yaw: f32) {
     hold::turn(w, "hips", lie);
 }
 
+// A body on its feet puts its weight where it is pushed. The hips go that way
+// and sink, the trunk leans on over them, and the head stays up and looks into
+// a turn. Returns how far the hips went, metres.
+fn lean(w: &mut World, body: &Parkour) -> f32 {
+    if body.look != 0.0 {
+        hold::turn(w, "neck", Quat::from_rotation_y(body.look));
+    }
+    let angle = body.tilt.length();
+    if angle < 1e-4 {
+        return 0.0;
+    }
+    let toward = body.tilt / angle;
+    let way = Quat::from_rotation_y(-body.yaw) * toward;
+    let height = hold::joint(w, "hips").y - feet(w.require::<Transform>("player").position).y;
+    let out = way * (height * math::sin(angle) * HIPS_OUT) - Vec3::Y * (HIPS_SINK * angle);
+    hold::shift(w, "hips", out);
+    hold::turn(w, "hips", Quat::from_axis_angle(Vec3::Y.cross(way), angle * TRUNK[0]));
+    let axis = Vec3::Y.cross(toward);
+    hold::turn_in_world(w, "spine", Quat::from_axis_angle(axis, angle * TRUNK[1]));
+    hold::turn_in_world(w, "chest", Quat::from_axis_angle(axis, angle * TRUNK[2]));
+    hold::turn_in_world(w, "neck", Quat::from_axis_angle(axis, -angle * NECK_BACK));
+    out.length()
+}
+
+// The lean of a body that is not on a wall, laid over the pose its move and its
+// holds made. On the ground the feet stay where the gait has them, so the legs
+// reach from the hips to the ground: a body that speeds up drives off a leg that
+// is behind it, one that brakes lands on a leg that is out in front, and one
+// that turns stands on the leg that is on the outside. In another move the lean
+// dies away, and the hands stay where that move has them too.
+fn balance(w: &mut World, body: &Parkour) {
+    if body.tilt == Vec3::ZERO && body.look == 0.0 {
+        return;
+    }
+    let kept: &[Limb] = match body.action {
+        Action::Ground => &[Limb::FootL, Limb::FootR],
+        _ => &Limb::ALL,
+    };
+    let placed = hold::placed(w, kept);
+    let out = lean(w, body);
+    hold::replace(w, &placed, out);
+}
+
 // A body that has leapt along a wall leans the way it goes, and its legs trail.
 fn lunge(w: &mut World, body: &Parkour) {
     let along = w.require::<CapsuleController>("player").velocity.dot(Vec3::Y.cross(body.wall));
@@ -1885,6 +2027,12 @@ pub fn present(w: &mut World, motion: Motion) {
                 Action::Air if body.near > 0.0 => Some((body.low, smooth(body.near))),
                 _ => None,
             };
+            // On a wall what is left of a lean moves the trunk only, and the
+            // holds reach from there.
+            let on_wall = matches!(action, Action::Vault(_) | Action::Climb(_) | Action::Hang(_));
+            if on_wall {
+                lean(w, &body);
+            }
             if let Some((wall, strength)) = &wall {
                 knees_out(w, wall, *strength);
             }
@@ -1912,6 +2060,9 @@ pub fn present(w: &mut World, motion: Motion) {
                     },
                 };
                 hold::correct(w, &lifted);
+            }
+            if !on_wall {
+                balance(w, &body);
             }
             return;
         }

@@ -24,6 +24,11 @@ const GRAVITY: f32 = 9.81;
 pub const ELBOW_LAG: f32 = 0.09;
 const WRIST_LAG: f32 = 0.17;
 const CHEST_LAG: f32 = 0.04;
+/// The shares of a pace's lean that the pelvis, the spine and the chest take.
+const LEAN: [f32; 3] = [0.3, 0.45, 0.25];
+/// How far the pelvis drops on the side of the leg that swings, radians, at a
+/// walk's arm swing.
+const LIST: f32 = 0.055;
 
 /// One gait, authored for `speed` m/s.
 #[derive(Clone, Copy)]
@@ -45,7 +50,8 @@ pub struct Pace {
     arms: f32,
     /// Elbow bend, radians.
     elbow: f32,
-    /// Forward lean of the spine, radians.
+    /// Forward lean of the trunk, radians: the pelvis, the spine and the chest
+    /// each take a share of it.
     lean: f32,
 }
 impl Pace {
@@ -102,9 +108,9 @@ pub const PACES: [Pace; 6] = [
     pace(0.8, 0.90, 30, 0.45, 0.05, 0.45, 0.012, 0.35, 0.25, 0.02),
     pace(1.5, 1.36, 28, 0.42, 0.09, 0.65, 0.020, 0.60, 0.30, 0.04),
     pace(2.4, 1.80, 23, 0.36, 0.16, 0.85, 0.040, 0.80, 0.60, 0.08),
-    pace(RUN, 2.30, 19, 0.32, 0.24, 0.95, 0.055, 1.00, 0.90, 0.13),
-    pace(4.8, 2.95, 15, 0.30, 0.33, 1.00, 0.060, 1.20, 1.15, 0.20),
-    pace(SPRINT, 3.50, 12, 0.30, 0.42, 1.00, 0.065, 1.35, 1.30, 0.26),
+    pace(RUN, 2.30, 19, 0.32, 0.24, 0.95, 0.055, 1.00, 0.90, 0.14),
+    pace(4.8, 2.95, 15, 0.30, 0.36, 1.00, 0.060, 1.40, 1.05, 0.24),
+    pace(SPRINT, 3.50, 12, 0.30, 0.50, 1.00, 0.065, 1.75, 1.10, 0.33),
 ];
 
 // A leg in the side view. Angles are measured from straight down, forward positive.
@@ -320,11 +326,23 @@ pub fn clip(rig: &Rig, pace: &Pace) -> Clip {
             .flat_map(|i| (rest - Vec3::Y * drop(i)).to_array())
             .collect(),
     }];
+    // The pelvis tips forward with the lean, and drops on the side of the leg that
+    // swings: a leg's side is highest in the middle of the time that leg stands
+    // alone. The thighs undo both turns, so the feet stay where the solve put them.
+    let pitch = LEAN[0] * pace.lean;
+    let list = |i: usize| {
+        LIST * (0.4 + 0.45 * pace.arms) * math::cos(TAU * (cycle(i) - 0.5 * pace.duty()))
+    };
     for leg in &legs {
         for (joint, &bone) in leg.bones.iter().enumerate() {
             tracks.push(turns(bone, &times, |i| {
                 let (ankle, _) = leg.ankle(pace, cycle(i));
-                Quat::from_rotation_x(leg.solve(ankle, drop(i))[joint])
+                let turn = leg.solve(ankle, drop(i))[joint];
+                if joint == 0 {
+                    Quat::from_rotation_z(-list(i)) * Quat::from_rotation_x(turn - pitch)
+                } else {
+                    Quat::from_rotation_x(turn)
+                }
             }));
         }
     }
@@ -356,23 +374,30 @@ pub fn clip(rig: &Rig, pace: &Pace) -> Clip {
             Quat::from_rotation_x(-0.3 * pace.arms * swing(i, phase + WRIST_LAG))
         }));
     }
-    // The hips turn with the stride. The spine leans in and turns back against them,
-    // the chest turns further and dips toward the planted side, and the neck undoes
-    // all three so the head keeps facing the way the body goes.
+    // The hips turn with the stride. The trunk leans in over them and turns back
+    // against them, the chest turns further, and the shoulders tip the other way
+    // from the pelvis: down on the side of the planted foot. The neck undoes most
+    // of it, so the head keeps level and faces the way the body goes.
     let twist = |i: usize| pace.arms * swing(i, 0.0);
     tracks.push(turns(hips as u32, &times, |i| {
         Quat::from_rotation_y(0.08 * twist(i))
+            * Quat::from_rotation_x(pitch)
+            * Quat::from_rotation_z(list(i))
     }));
     tracks.push(turns(node("spine") as u32, &times, |i| {
-        Quat::from_rotation_x(pace.lean) * Quat::from_rotation_y(-0.1 * twist(i))
+        Quat::from_rotation_x(LEAN[1] * pace.lean)
+            * Quat::from_rotation_y(-0.1 * twist(i))
+            * Quat::from_rotation_z(-0.6 * list(i))
     }));
     tracks.push(turns(node("chest") as u32, &times, |i| {
-        Quat::from_rotation_y(-0.07 * pace.arms * swing(i, CHEST_LAG))
-            * Quat::from_rotation_z(0.03 * pace.arms * math::sin(TAU * cycle(i)))
+        Quat::from_rotation_x(LEAN[2] * pace.lean)
+            * Quat::from_rotation_y(-0.07 * pace.arms * swing(i, CHEST_LAG))
+            * Quat::from_rotation_z(-0.8 * list(i))
     }));
     tracks.push(turns(node("neck") as u32, &times, |i| {
         Quat::from_rotation_y(0.02 * twist(i) + 0.07 * pace.arms * swing(i, CHEST_LAG))
             * Quat::from_rotation_x(-0.6 * pace.lean)
+            * Quat::from_rotation_z(0.4 * list(i))
     }));
     Clip {
         name: pace.clip(),

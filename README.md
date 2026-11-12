@@ -23,6 +23,14 @@ The camera trails the runner a little at speed and widens its view in a sprint. 
 
 Desktop and web keep the playfield clear. Coarse-pointer devices show a circular move pad, round Sprint, Slide and Jump buttons, and a Pause button. The controls have translucent backgrounds and visible outlines. The move pad's thumb follows the actual analog input, stays inside its circular range, and recenters when released. On a screen under 600 points wide the three round buttons stand in a column. One finger can slide between the three round buttons: it presses the one it arrives on, and Sprint stays held while a finger that went down on it visits Jump or Slide. The stick and the round buttons are the same distance from the screen's edge. The world draws under the notch and the home indicator; the controls keep clear of them.
 
+## Running
+
+The gait changes with the speed, from a shuffle to a sprint. In a sprint the trunk leans forward from the pelvis, the arms drive far forward and far back, and the heel of the free leg comes up to the hip. At every pace the pelvis drops on the side of the leg that swings, and the shoulders tip the other way.
+
+The body leans the way it is pushed. It leans forward when it speeds up, back when it brakes and into a turn. The hips go that way and sink, and the trunk leans over them. The feet stay where the gait put them, so a planted foot does not slide. A body that starts drives off a leg behind it. A body that brakes lands on a leg in front of it. The lean follows the push as a spring with no bounce, and it is at most 0.42 rad.
+
+An about-face is one motion. The push points the new way from the first tick, so the lean goes from the back, over one side, to the front. The body starts its turn while it still brakes and is side-on when it stops. It turns away from the foot that is next on the ground, so that foot is on the outside and pushes the body off. The head turns into the turn first. The controls and the speeds are the same as before: the lean changes only the drawn body.
+
 ## Moves
 
 Jump is the one parkour button. What it does depends on what is in front of the body.
@@ -93,7 +101,7 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 - `logic/src/park.rs`: the park as one table of blocks, and the ramp's rollers.
 - `logic/src/ragdoll.rs`: fifteen points held together by constraints. The engine's physics has no joints, so the ragdoll is solved here and collides through the physics queries.
 - `logic/src/rise.rs`: the two get-ups. Each is a list of stages that place the hips, wrists and ankles; the engine's two-bone solver turns the limbs to reach them, so a planted hand or foot does not move.
-- `logic/src/gait.rs`, `logic/src/locomotion.rs`: the gait clips and the clock that keeps planted feet still.
+- `logic/src/gait.rs`, `logic/src/locomotion.rs`: the gait clips and the clock that keeps planted feet still. `body::step` keeps the lean and `body::balance` lays it over the pose after the holds.
 - `logic/src/stickman.rs`: the skeleton, the other clips and the Animator, which has one state per action. `dressed` puts a body from `art/` on the skeleton in place of the mannequin.
 - `logic/src/mannequin.rs`: the shaped mannequin mesh: rounded chest and pelvis, tapered limbs, ball joints, hands and feet. It keeps the existing skeleton and hand sockets; rigid limb weights retain the carved shapes while the torso blends across the spine.
 - `logic/src/debug.rs`: `goto`, `camera` and `roller` messages for setting up a scene from an agent.
@@ -102,13 +110,13 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 89 hostless tests and the determinism lints. The tests load the baked `art/` with `exact_game::sim_with_art!`.
+`bun exact.mjs test-rust` runs 91 hostless tests and the determinism lints. The tests load the baked `art/` with `exact_game::sim_with_art!`.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
 - `logic/tests/bodies.rs`: each body in `art/` has the rig's joints at the rig's places, one mesh inside the vertex budget with valid weights, and no double-sided material. The player runs the same course in each body. The start screen's view keeps the body in place while the eye goes round it.
 
-- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides on level ground, through a turn to each side, and down and up the ramp, the landing depths, the touch messages, the roof gaps, drops and stairs. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick. Another runs 16 catches and climbs and fails if a joint shakes on the wall: if the change of its speed turns round from one tick to the next by more than 0.075 m.
+- `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides on level ground, through a turn to each side, and down and up the ramp, the landing depths, the touch messages, the roof gaps, drops and stairs, and the lean of a start, a stop and an about-face at a run and at a sprint. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick. Another runs 16 catches and climbs and fails if a joint shakes on the wall: if the change of its speed turns round from one tick to the next by more than 0.075 m.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
 - `logic/tests/sim.rs`: movement, the gait's planted feet, the arm swing and the rollers.
 
