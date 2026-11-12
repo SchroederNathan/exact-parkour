@@ -110,12 +110,13 @@ Run it with `execute_blender_code`. It makes a scene with the name of the body a
 3. It puts the feet where the mannequin's feet are, front to back.
 4. It replaces Meshy's step from the collar bone to the arm with a smooth one, 12 cm long. Meshy's step can be sharp, and a sharp step leaves a corner on the shoulder after the swing.
 5. It makes each arm longer along its own line, until the elbow and the wrist are as far from the shoulder as the game's. The two bodies needed 10 to 31 percent.
-6. It curls the fingers 65 degrees toward the palm and closes them a little. A Meshy hand is flat with spread fingers, and the game has no finger joints.
+6. It curls the fingers 100 degrees toward the palm and closes them a little, which makes a loose fist. A Meshy hand is flat with spread fingers, and the game has no finger joints.
 7. It turns the collar bone 8 degrees down and swings the arms down to the rest pose. The blend at the shoulder is a dual quaternion blend, which keeps the volume.
 8. It lets the body keep its own shoulders: the arm hangs up to 3 cm nearer the middle and up to 2 cm lower than the game's joints. Without this, a narrow body gets square shoulders.
 9. It adds the weights of each Meshy joint to the game joint that moves that part. Then it puts each hinge where the game's joint is: the knee, the ankle, the elbow, the wrist, and the line of the jaw between the neck and the head. A vertex keeps four joints at most.
 10. It makes the game's joints as bones that point up with no roll. Blender exports such a bone with no rotation.
-11. It ticks Backface Culling, removes vertex colours, makes the texture 1024 pixels and exports the GLB.
+11. It puts socks on the feet. See "Socks" below.
+12. It ticks Backface Culling, removes vertex colours, makes the texture 1024 pixels and exports the GLB.
 
 The numbers are constants at the top of the script. The script prints what it measured: the stretch of each arm, how far each ankle moved, and how far each shoulder is from its joint.
 
@@ -139,6 +140,34 @@ bun exact.mjs agent web --size 800x800 "tap runner-a" "tap play" "clock +1200" \
 ```
 
 Put the eye on the body's middle line. A near eye that is off the line makes straight feet look turned out.
+
+### Socks
+
+Meshy makes the toes as separate lumps with open gaps between them. No move of their vertices makes one surface, and a foot of a few hundred triangles has no good toes. The bodies wear socks, which hide them:
+
+- **Shape.** The script makes the hull of the front of each foot, makes it round and adds it to the mesh as the end of the sock. Toward the instep the new piece lies down on the foot. The toes go 4 mm inside it. All of the piece follows the foot joint. It adds about 600 triangles for each foot.
+- **Colour.** The script paints the texture where a leg is less than 21 cm above the ground. It interpolates the height inside each triangle, so the top of the sock is a clean line. A band of 3 cm at the top is darker. The new piece has no texels of its own: all of it takes the colour of one texel of the sock.
+
+`SOCK`, `SOCK_COLOUR`, `SOCK_BAND`, `TOE_BOX` and `TOE_ROUND` at the top of the script set the height, the colour and the shape.
+
+### Testing the movement
+
+`tools/qa.sh` is not in the repository; the scenes are short, and the commands are these. `clear` removes the blocks of a race, which leaves the park. `stick <x> <y>` holds the move stick part of the way out, which a key cannot do: it gives a walk.
+
+```sh
+# A walk from the side, eight frames.
+bun exact.mjs agent web --size 560x560 "tap runner-a" "tap play" "clock +250" \
+  "type world message clear" "type world message goto -6 0 14 90" \
+  "type world message camera 0 0.15 2.5 0" "clock +300" \
+  "type world message stick 0.5 0" "clock +1300" "screenshot walk.png over 840 every 120"
+# A hang, with the eye above the hands.
+bun exact.mjs agent web --size 560x560 "tap runner-a" "tap play" "clock +250" \
+  "type world message clear" "type world message camera 0.5 0.35 0.9 1.05" \
+  "type world message goto -3 0 -10.3 180" "clock +200" "type world key KeyW down" \
+  "clock +260" "type world key Space" "clock +700" "screenshot hang.png over 880 every 110"
+```
+
+Pictures show a pose. They do not show a joint that is somewhere else for one tick. `every_joint_goes_smoothly_through_every_move` in `logic/tests/bodies.rs` does: it runs twelve scenes of keys and reads the place of every joint on every tick. With `--nocapture` it prints the furthest that a joint went in one tick and the most that its step changed, for each scene. `FLUID_SCENE`, `FLUID_JOINT`, `FLUID_FROM` and `FLUID_TO` print the place of a joint tick by tick.
 
 In the game, `Game::ASSETS` names the bodies of `stickman::BODIES`, so setup waits for them. `stickman::dressed` puts the mesh, the material and the texture of a body on the code skeleton. `Options::character` selects the body: 0 is the mannequin, 1 is `body_a`, 2 is `body_b`. `logic/tests/bodies.rs` checks each body in `art/`: the joints and their places, the weights, the size, and that the player moves the same in every body.
 
@@ -178,8 +207,9 @@ Meshy refunds only a task that fails. A model that completes but looks bad still
 - The engine has not been tested with two skinned models on one skeleton. Test one shirt before you make more.
 - The prompts above have not been run. The two bodies came from reference images that were made with another tool. Adjust the style line on the first five images, then keep it fixed.
 - The two bodies were looked at in a stand, a run, a sprint, a jump, a slide, a hang and a landing. The climb onto a wall, the vault and the roll were not looked at closely.
-- The fingers are curled but have no joints. On a hang, the wrist is on the edge and the fingers stand above it.
-- The toes are coarse: Meshy makes the whole foot from a few hundred triangles.
+- The fingers are curled but have no joints. On an edge the hand lies palm down with the fingers in from the edge; the fingers do not close further round it.
+- The slide's start is fast: the trunk comes down 0.75 m in 0.11 s. The hand and the head go up to 0.11 m in one tick there and in a roll. The test allows 0.12 m.
+- The stand's jump throws both arms up and brings them down through the level of the shoulders. It was not changed.
 - The texture has detail from the front view only. The back comes from Meshy's guess.
 - An A-pose reference image needs a smaller swing at the shoulder than a T-pose image. This was not tried.
 
