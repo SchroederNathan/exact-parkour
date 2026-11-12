@@ -104,17 +104,17 @@ A prop that hits the body with 200 kg·m/s or more knocks it down. A lighter hit
 - `logic/src/gait.rs`, `logic/src/locomotion.rs`: the gait clips and the clock that keeps planted feet still. `body::step` keeps the lean and `body::balance` lays it over the pose after the holds.
 - `logic/src/stickman.rs`: the skeleton, the other clips and the Animator, which has one state per action. `dressed` puts a body from `art/` on the skeleton in place of the mannequin.
 - `logic/src/mannequin.rs`: the shaped mannequin mesh: rounded chest and pelvis, tapered limbs, ball joints, hands and feet. It keeps the existing skeleton and hand sockets; rigid limb weights retain the carved shapes while the torso blends across the spine.
-- `logic/src/debug.rs`: `goto`, `camera` and `roller` messages for setting up a scene from an agent.
+- `logic/src/debug.rs`: `goto`, `camera` and `roller` messages for setting up a scene from an agent. A fourth number on `camera` raises the point that the eye looks at, for a close view of one part of the body.
 - `app.contract`: the title screen with the choice of runner, and the touch controls.
 - `art/body_a.glb`, `art/body_b.glb`: the two runners. `tools/fit_body.py` makes such a file from a Meshy rig, in Blender.
 
 ## Tests
 
-`bun exact.mjs test-rust` runs 91 hostless tests and the determinism lints. The tests load the baked `art/` with `exact_game::sim_with_art!`.
+`bun exact.mjs test-rust` runs 93 hostless tests and the determinism lints. The tests load the baked `art/` with `exact_game::sim_with_art!`.
 
 - `logic/tests/mannequin.rs`: closed mesh topology, normals, skin weights, height scaling and compatibility with the animation skeleton and hand sockets.
 
-- `logic/tests/bodies.rs`: each body in `art/` has the rig's joints at the rig's places, one mesh inside the vertex budget with valid weights, and no double-sided material. The player runs the same course in each body. The start screen's view keeps the body in place while the eye goes round it.
+- `logic/tests/bodies.rs`: each body in `art/` has the rig's joints at the rig's places, one mesh inside the vertex budget with valid weights, and no double-sided material. The player runs the same course in each body. The start screen's view keeps the body in place while the eye goes round it. All of a foot follows the foot joint, and the neck follows the neck joint. A stand is the same on both sides, in the mannequin and in each body, and a body's hands are by its thighs.
 
 - `logic/tests/parkour.rs`: every move in the park, checked on every tick. 56 vaults and 20 grabs across approach angles and speeds, climbs, a shimmy to both ends of a wall with the lean at each, leaps from the end of an edge, slides on level ground, through a turn to each side, and down and up the ramp, the landing depths, the touch messages, the roof gaps, drops and stairs, and the lean of a start, a stop and an about-face at a run and at a sprint. On every tick of a vault, a hang and a climb no bone of the drawn body is in a wall. A vault's hand is on the wall's top, and hanging hands are within 1 cm of the edge. One test runs 16 jumps, catches and climbs and fails if a wrist or an ankle moves more than 0.1 m in one tick. Another runs 16 catches and climbs and fails if a joint shakes on the wall: if the change of its speed turns round from one tick to the next by more than 0.075 m.
 - `logic/tests/ragdoll.rs`: falls from 6.5 and 9 m, four kinds of roller, a hit while hanging, and 56 throws into walls, corners, roofs and the ramp's lane. Each ends on its feet. Every tick checks the points, the bone lengths and the drawn pose.
